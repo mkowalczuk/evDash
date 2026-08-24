@@ -1,5 +1,13 @@
 # RELEASE NOTES
 
+### V5.0.8 2026-08-24
+- Sentry gyro/accel wake-up finally fires while driving away (reported on Peugeot e-208, "still no automatic waking up even with Gyro function"):
+  - The motion flag was overwritten with the instantaneous IMU state on every boardLoop pass (every 50 ms in Sentry), but the wake check in mainLoop runs only ~1x per second and required 3 consecutive hits. So 19 of every 20 IMU samples were discarded and a wake needed the car to be above the motion threshold at 3 exact instants spaced 1 s apart - practically never true for vibration or a short acceleration, which is why only a screen touch woke the device. The flag is now a latch: any motion sample inside the ~1 s idle window arms it, the wake check consumes it, and 3 consecutive windows with motion (~3 s of driving) trigger the wake. False-positive protection is unchanged - a single door slam or bump arms at most 1-2 windows and the 5-wakes-per-session budget still applies.
+- Charging graph Y-axis scales to the car again (reported: 100 kW car wasting the top half of a fixed 200 kW scale):
+  - The auto-scale (max observed charging power rounded up to the next 10 kW, minimum 80) was already implemented but a leftover debug override from January 2025 pinned the scale to 200 kW for everyone. Removed the override, so a 100 kW e-208 session now uses a 100 kW scale with double the vertical resolution, while e-GMP cars grow the scale dynamically as measured power rises.
+- Battery cells screen fits 108-cell packs (PSA e-CMP, VW MEB) on a single page:
+  - The cell grid was fixed at 8 columns, so a 108-cell pack needed 2 pages with the second one nearly empty (12 of 108 values). The grid now switches to 9 columns when that makes the whole pack fit on one page; 96-cell packs keep the old 8-column layout and 180+-cell packs still paginate.
+
 ### V5.0.7 2026-07-12
 - Sentry wake-up now also triggers on linear acceleration, not only rotation:
   - In Sentry the command queue is stopped and the CAN bus is off (to protect the 12 V), so the device can only wake on motion. The motion detector keyed solely off the gyro (angular rate > 15°/s), which a smooth straight pull-away barely produces, so a car driven away from a parked Sentry state stayed asleep until the first turn or bump and only a screen touch woke it (reported on the Peugeot e-208). It now also wakes when the accelerometer magnitude deviates from ~1 g (driving accel, braking, road bumps); a 4 g guard ignores a bad/unit-mismatched read so it falls back to gyro-only rather than pinning the device permanently awake. Extracted into a shared `updateGyroSensorMotion()` helper used by both Core2 and CoreS3, so the four previously duplicated detection blocks stay in sync.

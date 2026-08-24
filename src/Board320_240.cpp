@@ -1367,6 +1367,10 @@ void Board320_240::printHeapMemory()
  * Update the IMU motion flag used to wake Sentry.
  * Motion = angular rate (gyro) OR linear acceleration off ~1 g (accelerometer),
  * so a smooth straight pull-away wakes the device too, not only a turn/bump.
+ * The flag is a latch: set here on motion, consumed (cleared) once per mainLoop
+ * pass by the wake logic. In Sentry boardLoop samples the IMU every 50 ms while
+ * mainLoop runs ~1x/s, so without the latch only the last IMU sample of each
+ * 1 s window was visible and short motion events were almost always missed.
  */
 void Board320_240::updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ, float accX, float accY, float accZ)
 {
@@ -1385,7 +1389,8 @@ void Board320_240::updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ,
   if (accMag < 4.0 && fabs(accMag - 1.0) > 0.12)
     motion = true;
 
-  liveData->params.gyroSensorMotion = motion;
+  if (motion)
+    liveData->params.gyroSensorMotion = true;
 }
 
 /**
@@ -2265,6 +2270,9 @@ void Board320_240::mainLoop()
       motionWakeAllowed && gpsWakeRemaining &&
       (liveData->params.gpsValid && liveData->params.speedKmhGPS >= 5 && liveData->params.gpsSat >= 4); // 5 floor parking house, satelites 5 & gps speed = 274kmh :/
   const bool gyroWakeCandidate = motionWakeAllowed && gyroWakeRemaining && liveData->params.gyroSensorMotion;
+  // Consume the motion latch: each pass then answers "any motion since the last
+  // check", so all ~20 IMU samples of a Sentry idle window count, not just the last.
+  liveData->params.gyroSensorMotion = false;
 
   if (queueStopped && gpsWakeCandidate)
   {

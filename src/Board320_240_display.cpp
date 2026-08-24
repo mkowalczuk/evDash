@@ -676,9 +676,9 @@ void Board320_240::drawSceneHud()
 }
 
 /**
- * Number of visible battery cell values per page.
+ * Number of visible battery cell rows per page.
  */
-uint16_t Board320_240::batteryCellsCellsPerPage()
+uint16_t Board320_240::batteryCellsRowsPerPage()
 {
   int32_t lastPosY = 64 - 16;
   if (liveData->params.batModuleTempCount > 4)
@@ -693,7 +693,27 @@ uint16_t Board320_240::batteryCellsCellsPerPage()
   if (rowsPerPage < 1)
     rowsPerPage = 1;
 
-  return rowsPerPage * 8;
+  return rowsPerPage;
+}
+
+/**
+ * Number of battery cell grid columns.
+ * 9 columns when it lets the whole pack fit on a single page (e.g. 108-cell PSA/VW packs).
+ */
+uint16_t Board320_240::batteryCellsColumns()
+{
+  uint16_t rowsPerPage = batteryCellsRowsPerPage();
+  if (liveData->params.cellCount > rowsPerPage * 8 && liveData->params.cellCount <= rowsPerPage * 9)
+    return 9;
+  return 8;
+}
+
+/**
+ * Number of visible battery cell values per page.
+ */
+uint16_t Board320_240::batteryCellsCellsPerPage()
+{
+  return batteryCellsRowsPerPage() * batteryCellsColumns();
 }
 
 /**
@@ -841,13 +861,15 @@ void Board320_240::drawSceneBatteryCells()
   }
 
   // Draw cell matrix
+  uint16_t cellCols = batteryCellsColumns();
+  int32_t cellColWidth = (cellCols > 8) ? 35 : 40;
   for (int i = cellFirstIndex; i < cellLastIndex; i++)
   {
     if (liveData->params.cellVoltage[i] == -1)
       continue;
     int localIndex = i - cellFirstIndex;
-    posx = ((localIndex % 8) * 40) + 4;
-    posy = ((localIndex / 8) * 13) + lastPosY + 16;
+    posx = ((localIndex % cellCols) * cellColWidth) + 4;
+    posy = ((localIndex / cellCols) * 13) + lastPosY + 16;
     sprintf(tmpStr3, "%01.02f", liveData->params.cellVoltage[i]);
     spr.setTextColor(TFT_SILVER);
     if (liveData->params.cellVoltage[i] == minVal && minVal != maxVal)
@@ -885,7 +907,6 @@ void Board320_240::drawSceneChargingGraph()
 
   // Round up maxKw to the next multiple of 10
   maxKw = ((maxKw + 9) / 10) * 10;
-  maxKw = 200;
   // Recalculate the Y-axis multiplier based on the actual maxKw
   mulY = 160.0f / maxKw;
 

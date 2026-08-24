@@ -261,6 +261,8 @@ public:
   void drawSceneMain();
   void drawSceneSpeed();
   void drawSceneHud();
+  uint16_t batteryCellsRowsPerPage();
+  uint16_t batteryCellsColumns();
   uint16_t batteryCellsCellsPerPage();
   uint16_t batteryCellsPageCount();
   void batteryCellsPageMove(bool forward);

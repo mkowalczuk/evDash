@@ -1,5 +1,7 @@
 [common]
-platform = espressif32
+; Keep pinned: Arduino core 3.x (pioarduino 5x.x platforms) breaks M5Core2/AnalogWrite
+; libs, and 6.12.0 (core 2.0.17) overflows ESP32 IRAM. Releases are built with 6.4.0.
+platform = espressif32 @ 6.4.0
 framework = arduino
 upload_protocol = esptool
 monitor_speed = 115200
