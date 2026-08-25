@@ -573,7 +573,7 @@ void EvDashMobileRelay::sendCells()
 void EvDashMobileRelay::sendTemps()
 {
   PARAMS_STRUC &p = liveData->params;
-  const uint16_t count = (p.batModuleTempCount > 0 && p.batModuleTempCount <= 25) ? p.batModuleTempCount : 25;
+  const uint16_t count = (p.batModuleTempCount > 0 && p.batModuleTempCount <= 56) ? p.batModuleTempCount : 56;
   String json = "{\"type\":\"temps\",\"ver\":2,\"modules\":[";
   bool first = true;
   for (uint16_t i = 0; i < count; i++)

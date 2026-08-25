@@ -12,7 +12,7 @@
 namespace
 {
   const uint8_t kPsaCellCount = 108;
-  const uint8_t kPsaModuleTempCount = 24; // M5 LiveData stores max 25 module temps.
+  const uint8_t kPsaModuleTempCount = 54; // e-CMP: one probe per 2 cells (verified in the mobile app)
   const time_t kParkDebounceSec = 120;    // stand still this long (speed <= 1) before leaving drive mode
   time_t psaLastMovingTime = 0;
 

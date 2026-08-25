@@ -26,6 +26,7 @@ protected:
   bool sentCanData = false;
   int16_t rxRemaining; // Remaining bytes to complete message, signed is ok
   uint8_t requestFramesCount = 0;
+  uint16_t rxSequenceRow = 0; // receive-order row key for dataRows (ISO-TP 4-bit index wraps)
   char msgString[128]; // Array to store serial string
   uint32_t lastPid;
   unsigned long lastDataSent = 0;

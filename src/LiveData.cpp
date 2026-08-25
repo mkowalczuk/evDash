@@ -61,6 +61,9 @@ void LiveData::initParams()
   params.gpsLastFixMs = 0;
   params.setGpsTimeFromCar = 0;
   params.gyroSensorMotion = false;
+  params.imuGyroX = params.imuGyroY = params.imuGyroZ = 0;
+  params.imuAccX = params.imuAccY = params.imuAccZ = 0;
+  params.imuMotionCount = 0;
   // Display
   params.displayScreen = SCREEN_SPEED;
   params.displayScreenAutoMode = SCREEN_AUTO;
@@ -143,14 +146,10 @@ void LiveData::initParams()
   params.batFanFeedbackHz = -1;
   params.batMinC = -100;
   params.batMaxC = -100;
-  for (int i = 0; i < 25; i++)
+  for (int i = 0; i < 56; i++)
   {
     params.batModuleTempC[i] = -100;
   }
-  params.batModuleTempC[0] = -100;
-  params.batModuleTempC[1] = -100;
-  params.batModuleTempC[2] = -100;
-  params.batModuleTempC[3] = -100;
   params.coolingWaterTempC = -100;
   params.coolantTemp1C = -100;
   params.coolantTemp2C = -100;

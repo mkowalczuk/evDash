@@ -1378,19 +1378,31 @@ void Board320_240::updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ,
   if (gyroX == 0.0 && gyroY == 0.0 && gyroZ == 0.0 && accX == 0.0 && accY == 0.0 && accZ == 0.0)
     return;
 
+  // Snapshot for the debug screen (page 3), so motion detection can be verified live.
+  liveData->params.imuGyroX = gyroX;
+  liveData->params.imuGyroY = gyroY;
+  liveData->params.imuGyroZ = gyroZ;
+  liveData->params.imuAccX = accX;
+  liveData->params.imuAccY = accY;
+  liveData->params.imuAccZ = accZ;
+
   // Angular rate: a turn, bump or being picked up.
-  bool motion = (abs(gyroX) > 15.0 || abs(gyroY) > 15.0 || abs(gyroZ) > 15.0);
+  bool motion = (abs(gyroX) > 12.0 || abs(gyroY) > 12.0 || abs(gyroZ) > 12.0);
 
   // Linear acceleration: |accel| is ~1 g at rest regardless of mounting angle;
   // driving accel, braking and road bumps push it off 1 g. The < 4 g guard
   // ignores a unit/scale glitch, so a bad read falls back to gyro-only instead
-  // of pinning the device permanently awake.
+  // of pinning the device permanently awake. 0.09 g keeps ~2x margin above
+  // typical accelerometer calibration bias (a few % of 1 g).
   const float accMag = sqrt(accX * accX + accY * accY + accZ * accZ);
-  if (accMag < 4.0 && fabs(accMag - 1.0) > 0.12)
+  if (accMag < 4.0 && fabs(accMag - 1.0) > 0.09)
     motion = true;
 
   if (motion)
+  {
     liveData->params.gyroSensorMotion = true;
+    liveData->params.imuMotionCount++;
+  }
 }
 
 /**
@@ -2289,9 +2301,16 @@ void Board320_240::mainLoop()
     if (gyroWakeConfirmCount < kGyroWakeConfirmSamples)
       gyroWakeConfirmCount++;
   }
-  else
+  else if (!queueStopped)
   {
     gyroWakeConfirmCount = 0;
+  }
+  else if (gyroWakeConfirmCount > 0)
+  {
+    // Decay instead of hard reset: real driving over speed bumps or stop-and-go
+    // produces intermittent motion windows; a single quiet second must not throw
+    // away the whole confirmation streak, or the wake never accumulates.
+    gyroWakeConfirmCount--;
   }
 
   const bool gpsWake = queueStopped && (gpsWakeConfirmCount >= kGpsWakeConfirmSamples);

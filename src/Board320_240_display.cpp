@@ -755,7 +755,7 @@ void Board320_240::batteryCellsPageMove(bool forward)
  */
 uint8_t Board320_240::debugInfoPageCount()
 {
-  return 2;
+  return 3;
 }
 
 /**
@@ -1272,6 +1272,41 @@ void Board320_240::drawSceneDebug()
     drawLine(tmpStr1);
 
     snprintf(tmpStr1, sizeof(tmpStr1), "NET %s FAIL %u VOLT %s", liveData->params.netAvailable ? "OK" : "DOWN", liveData->params.netFailureCount, onOff(liveData->settings.voltmeterEnabled == 1));
+    drawLine(tmpStr1);
+  }
+  else if (debugInfoPage == 2)
+  {
+    // IMU / Sentry motion wake diagnostics
+    drawLine("IMU MOTION WAKE", TFT_WHITE);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "GYR %.1f %.1f %.1f dps", liveData->params.imuGyroX, liveData->params.imuGyroY, liveData->params.imuGyroZ);
+    drawLine(tmpStr1);
+
+    const float accMag = sqrt(liveData->params.imuAccX * liveData->params.imuAccX +
+                              liveData->params.imuAccY * liveData->params.imuAccY +
+                              liveData->params.imuAccZ * liveData->params.imuAccZ);
+    snprintf(tmpStr1, sizeof(tmpStr1), "ACC %.2f %.2f %.2f g", liveData->params.imuAccX, liveData->params.imuAccY, liveData->params.imuAccZ);
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "MAG %.3fg DEV %.3fg", accMag, fabs(accMag - 1.0));
+    drawLine(tmpStr1, (fabs(accMag - 1.0) > 0.09) ? TFT_CYAN : TFT_SILVER);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "THRESH 12dps / 0.09g");
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "MOTION CNT %lu", static_cast<unsigned long>(liveData->params.imuMotionCount));
+    drawLine(tmpStr1, TFT_CYAN);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "WAKE ALLOW %s LOCK %s", onOff(liveData->settings.voltmeterEnabled == 0), onOff(liveData->params.motionWakeLocked));
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "WAKE CNT GPS %u GYRO %u", liveData->params.gpsWakeCount, liveData->params.gyroWakeCount);
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "CELLS %u TEMPS %u", liveData->params.cellCount, liveData->params.batModuleTempCount);
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "QUEUE %s", liveData->params.stopCommandQueue ? "STOP (SENTRY)" : "RUN");
     drawLine(tmpStr1);
   }
   else

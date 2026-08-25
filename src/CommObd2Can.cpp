@@ -691,6 +691,7 @@ bool CommObd2Can::processFrameBytes()
 
     mergedData.clear();
     dataRows.clear();
+    rxSequenceRow = 0;
 
     const uint8_t framePayloadSize = frameLenght - sizeof(FirstFrame_t); // remove one byte of header
     dataRows[0].assign(pFirstFrame->pData, pFirstFrame->pData + framePayloadSize);
@@ -714,7 +715,21 @@ bool CommObd2Can::processFrameBytes()
 
     ConsecutiveFrame_t *pConseqFrame = (ConsecutiveFrame_t *)pDataStart;
     const uint8_t framePayloadSize = frameLenght - sizeof(ConsecutiveFrame_t); // remove one byte of header
-    dataRows[pConseqFrame->index].assign(pConseqFrame->pData, pConseqFrame->pData + framePayloadSize);
+    // Key rows by receive order, not by the ISO-TP index: the on-wire index is only
+    // 4 bits and wraps 15->0. A response longer than FF + 15 CFs (111 bytes, e.g.
+    // PSA e-208 D440 with 108 cell voltages = 219 bytes / 31 CFs) would overwrite
+    // rows 0..15 on the second lap - including row 0 with the First frame - so the
+    // merged response no longer started with "62 DID" and the parser dropped it.
+    // CAN delivers CFs of one ISO-TP message in order, so receive order is correct.
+    rxSequenceRow++;
+    if ((rxSequenceRow & 0x0F) != pConseqFrame->index)
+    {
+      syslog->infoNolf(DEBUG_COMM, "ISO-TP sequence mismatch, expected ");
+      syslog->infoNolf(DEBUG_COMM, rxSequenceRow & 0x0F);
+      syslog->infoNolf(DEBUG_COMM, " got ");
+      syslog->info(DEBUG_COMM, pConseqFrame->index);
+    }
+    dataRows[rxSequenceRow].assign(pConseqFrame->pData, pConseqFrame->pData + framePayloadSize);
     rxRemaining -= framePayloadSize;
 
     // syslog->print("----Processing ConsecFrame payload: "); printHexBuffer(pConseqFrame->pData, framePayloadSize, true);

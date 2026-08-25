@@ -142,6 +142,9 @@ typedef struct
   uint32_t gpsLastFixMs;
   time_t setGpsTimeFromCar;
   bool gyroSensorMotion;
+  float imuGyroX, imuGyroY, imuGyroZ; // last IMU gyro sample [deg/s], for debug screen
+  float imuAccX, imuAccY, imuAccZ;    // last IMU accel sample [g], for debug screen
+  uint32_t imuMotionCount;            // motion samples detected since boot
   // SD card
   bool sdcardInit;
   bool sdcardRecording;
@@ -233,7 +236,7 @@ typedef struct
   float batMinC;
   float batMaxC;
   uint16_t batModuleTempCount;
-  float batModuleTempC[25];
+  float batModuleTempC[56]; // PSA e-CMP reports 54 probes (1 per 2 cells)
   float coolingWaterTempC;
   float coolantTemp1C;
   float coolantTemp2C;
