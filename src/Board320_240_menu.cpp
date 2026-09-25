@@ -540,13 +540,37 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     sprintf(tmpStr1, "%s", liveData->settings.wifiPassword2);
     suffix = tmpStr1;
     break;
+  case MENU_WIFI_SSID3:
+    sprintf(tmpStr1, "%s", liveData->settings.wifiSsid3);
+    suffix = tmpStr1;
+    break;
+  case MENU_WIFI_PASSWORD3:
+    sprintf(tmpStr1, "%s", liveData->settings.wifiPassword3);
+    suffix = tmpStr1;
+    break;
+  case MENU_WIFI_SSID4:
+    sprintf(tmpStr1, "%s", liveData->settings.wifiSsid4);
+    suffix = tmpStr1;
+    break;
+  case MENU_WIFI_PASSWORD4:
+    sprintf(tmpStr1, "%s", liveData->settings.wifiPassword4);
+    suffix = tmpStr1;
+    break;
   case MENU_WIFI_NTP:
     suffix = (liveData->settings.ntpEnabled == 1) ? "[on]" : "[off]";
     break;
   case MENU_WIFI_ACTIVE:
-    if (liveData->params.isWifiBackupLive == true)
+    if (liveData->params.wifiActiveIndex == 1)
     {
-      suffix = "backup";
+      suffix = "2nd AP";
+    }
+    else if (liveData->params.wifiActiveIndex == 2)
+    {
+      suffix = "3rd AP";
+    }
+    else if (liveData->params.wifiActiveIndex == 3)
+    {
+      suffix = "4th AP";
     }
     else
     {
@@ -1611,6 +1635,56 @@ void Board320_240::menuItemClick()
       if (promptKeyboard(title.c_str(), value, false, sizeof(liveData->settings.wifiPassword2) - 1))
       {
         value.toCharArray(liveData->settings.wifiPassword2, sizeof(liveData->settings.wifiPassword2));
+        saveSettings();
+      }
+      showMenu();
+      return;
+    }
+    break;
+    case MENU_WIFI_SSID3:
+    {
+      String value = String(liveData->settings.wifiSsid3);
+      if (promptKeyboard("Change WiFi SSID3", value, false, sizeof(liveData->settings.wifiSsid3) - 1))
+      {
+        value.toCharArray(liveData->settings.wifiSsid3, sizeof(liveData->settings.wifiSsid3));
+        saveSettings();
+      }
+      showMenu();
+      return;
+    }
+    break;
+    case MENU_WIFI_PASSWORD3:
+    {
+      String value = String(liveData->settings.wifiPassword3);
+      String title = String("Passwd for ") + String(liveData->settings.wifiSsid3);
+      if (promptKeyboard(title.c_str(), value, false, sizeof(liveData->settings.wifiPassword3) - 1))
+      {
+        value.toCharArray(liveData->settings.wifiPassword3, sizeof(liveData->settings.wifiPassword3));
+        saveSettings();
+      }
+      showMenu();
+      return;
+    }
+    break;
+    case MENU_WIFI_SSID4:
+    {
+      String value = String(liveData->settings.wifiSsid4);
+      if (promptKeyboard("Change WiFi SSID4", value, false, sizeof(liveData->settings.wifiSsid4) - 1))
+      {
+        value.toCharArray(liveData->settings.wifiSsid4, sizeof(liveData->settings.wifiSsid4));
+        saveSettings();
+      }
+      showMenu();
+      return;
+    }
+    break;
+    case MENU_WIFI_PASSWORD4:
+    {
+      String value = String(liveData->settings.wifiPassword4);
+      String title = String("Passwd for ") + String(liveData->settings.wifiSsid4);
+      if (promptKeyboard(title.c_str(), value, false, sizeof(liveData->settings.wifiPassword4) - 1))
+      {
+        value.toCharArray(liveData->settings.wifiPassword4, sizeof(liveData->settings.wifiPassword4));
         saveSettings();
       }
       showMenu();

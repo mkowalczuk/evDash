@@ -236,6 +236,7 @@ public:
   void wifiFallback();
   void wifiSwitchToMain();
   void wifiSwitchToBackup();
+  void wifiSwitchToIndex(uint8_t index);
   void uploadSdCardLogToEvDashServer(bool silent = false);
   void queueAbrpSdLog(const char *payload, size_t length, time_t currentTime, uint64_t operationTimeSec, bool timeSyncWithGps);
   bool wifiScanToMenu();

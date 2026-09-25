@@ -2360,9 +2360,9 @@ void Board320_240::mainLoop()
       WiFi.enableSTA(true);
       WiFi.mode(WIFI_STA);
 
-      if (liveData->settings.backupWifiEnabled == 1 && liveData->params.isWifiBackupLive)
+      if (liveData->params.wifiActiveIndex > 0)
       {
-        wifiSwitchToBackup();
+        wifiSwitchToIndex(liveData->params.wifiActiveIndex);
       }
       else
       {
@@ -3019,8 +3019,23 @@ void Board320_240::syncGPS()
  *
  * @return True if WiFi initialization and connection succeeded, false otherwise.
  */
+static bool isWifiSsidConfigured(const char *ssid)
+{
+  return ssid != nullptr && ssid[0] != '\0' && strcmp(ssid, "empty") != 0 && strcmp(ssid, "not_set") != 0;
+}
+
+/**
+ * Initializes and connects to WiFi using the stored SSID and password.
+ *
+ * Enables STA mode, starts the connection, and updates the last connected time.
+ *
+ * @return True if WiFi initialization and connection succeeded, false otherwise.
+ */
 bool Board320_240::wifiSetup()
 {
+  liveData->params.wifiActiveIndex = 0;
+  liveData->params.isWifiBackupLive = false;
+
   syslog->print("Initializing WiFi with SSID: ");
   syslog->println(liveData->settings.wifiSsid);
 
@@ -3036,60 +3051,145 @@ bool Board320_240::wifiSetup()
 }
 
 /**
- * Handles switching between main and backup WiFi networks.
+ * Handles switching between main and backup WiFi networks (primary, ssid2, ssid3, ssid4).
  *
- * Disconnects from the current WiFi network. If a backup network is configured, it switches to the backup
- * network or restores the main network otherwise. Useful for maintaining connectivity during interruptions.
+ * Disconnects from the current WiFi network and attempts connection to the next configured AP.
  */
 void Board320_240::wifiFallback()
 {
   WiFi.disconnect(true);
 
-  if (liveData->settings.backupWifiEnabled == 1)
+  uint8_t currentIndex = liveData->params.wifiActiveIndex;
+  uint8_t targetIndex = 0;
+  bool found = false;
+
+  for (uint8_t i = 1; i <= 3; i++)
   {
-    if (liveData->params.isWifiBackupLive == false)
+    uint8_t candidate = (currentIndex + i) % 4;
+    if (candidate == 0)
     {
-      wifiSwitchToBackup();
+      if (isWifiSsidConfigured(liveData->settings.wifiSsid))
+      {
+        targetIndex = 0;
+        found = true;
+        break;
+      }
     }
-    else
+    else if (candidate == 1)
     {
-      wifiSwitchToMain();
+      if (liveData->settings.backupWifiEnabled == 1 && isWifiSsidConfigured(liveData->settings.wifiSsid2))
+      {
+        targetIndex = 1;
+        found = true;
+        break;
+      }
     }
+    else if (candidate == 2)
+    {
+      if (isWifiSsidConfigured(liveData->settings.wifiSsid3))
+      {
+        targetIndex = 2;
+        found = true;
+        break;
+      }
+    }
+    else if (candidate == 3)
+    {
+      if (isWifiSsidConfigured(liveData->settings.wifiSsid4))
+      {
+        targetIndex = 3;
+        found = true;
+        break;
+      }
+    }
+  }
+
+  if (found)
+  {
+    wifiSwitchToIndex(targetIndex);
   }
   else
   {
-    // Attempt reconnection to the main WiFi if no backup is configured
     wifiSwitchToMain();
   }
 }
 
 /**
- * Switches to the backup WiFi network.
- *
- * Updates relevant parameters and attempts to connect using the backup credentials.
+ * Switches to a specific WiFi network index (0=main, 1=ssid2, 2=ssid3, 3=ssid4).
  */
-void Board320_240::wifiSwitchToBackup()
+void Board320_240::wifiSwitchToIndex(uint8_t index)
 {
-  syslog->print("Switching to backup WiFi: ");
-  syslog->println(liveData->settings.wifiSsid2);
-  WiFi.begin(liveData->settings.wifiSsid2, liveData->settings.wifiPassword2);
-  liveData->params.isWifiBackupLive = true;
-  liveData->params.wifiBackupUptime = liveData->params.currentTime;
+  const char *ssid = "";
+  const char *password = "";
+  switch (index)
+  {
+  case 0:
+    ssid = liveData->settings.wifiSsid;
+    password = liveData->settings.wifiPassword;
+    break;
+  case 1:
+    ssid = liveData->settings.wifiSsid2;
+    password = liveData->settings.wifiPassword2;
+    break;
+  case 2:
+    ssid = liveData->settings.wifiSsid3;
+    password = liveData->settings.wifiPassword3;
+    break;
+  case 3:
+    ssid = liveData->settings.wifiSsid4;
+    password = liveData->settings.wifiPassword4;
+    break;
+  default:
+    index = 0;
+    ssid = liveData->settings.wifiSsid;
+    password = liveData->settings.wifiPassword;
+    break;
+  }
+
+  liveData->params.wifiActiveIndex = index;
+  liveData->params.isWifiBackupLive = (index > 0);
+  if (index == 1)
+  {
+    liveData->params.wifiBackupUptime = liveData->params.currentTime;
+    syslog->print("Switching to 2nd AP: ");
+    syslog->println(ssid);
+  }
+  else if (index == 2)
+  {
+    liveData->params.wifiBackupUptime = liveData->params.currentTime;
+    syslog->print("Switching to 3rd AP: ");
+    syslog->println(ssid);
+  }
+  else if (index == 3)
+  {
+    liveData->params.wifiBackupUptime = liveData->params.currentTime;
+    syslog->print("Switching to 4th AP: ");
+    syslog->println(ssid);
+  }
+  else
+  {
+    syslog->print("Switching to main WiFi: ");
+    syslog->println(ssid);
+  }
+
+  WiFi.begin(ssid, password);
   liveData->params.wifiLastConnectedTime = liveData->params.currentTime;
 }
 
 /**
- * Restores the main WiFi connection.
- *
- * Reverts to the main WiFi credentials and updates status parameters.
+ * Switches to the backup WiFi network (index 1).
+ */
+void Board320_240::wifiSwitchToBackup()
+{
+  wifiSwitchToIndex(1);
+}
+
+/**
+ * Restores the main WiFi connection (index 0).
  */
 void Board320_240::wifiSwitchToMain()
 {
-  syslog->print("Switching to main WiFi: ");
-  syslog->println(liveData->settings.wifiSsid);
-  WiFi.begin(liveData->settings.wifiSsid, liveData->settings.wifiPassword);
-  liveData->params.isWifiBackupLive = false;
-  liveData->params.wifiLastConnectedTime = liveData->params.currentTime;
+  wifiSwitchToIndex(0);
 }
 
 bool Board320_240::wifiScanToMenu()

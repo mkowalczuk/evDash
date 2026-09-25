@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 25
+#define SETTINGS_VERSION_CURRENT 26
 
 //
 #define MONTH_SEC 2678400
@@ -153,10 +153,12 @@ typedef struct
   time_t netLastFailureTime;
   time_t netFailureStartTime;
   uint16_t netFailureCount;
-  bool isWifiBackupLive;
+  uint8_t wifiActiveIndex;       // 0 = main, 1 = ssid2, 2 = ssid3, 3 = ssid4
+  bool isWifiBackupLive;         // true if any backup SSID is active (derived from wifiActiveIndex)
   time_t wifiLastConnectedTime;
   time_t wifiBackupUptime;
   bool wifiApMode; // hotspot
+  bool abrpDebug;  // ABRP verbose debug logging (abrpDebug=0/1 in console)
   // GPS
   bool currTimeSyncWithGps;
   bool gpsValid;
@@ -402,6 +404,10 @@ typedef struct
   char wifiSsid2[32];        // backup wifi SSID
   char wifiPassword2[32];    // backup wifi Pass
   uint8_t backupWifiEnabled; // enable Backup WIFI fallback 0/1
+  char wifiSsid3[32];        // backup wifi SSID 3
+  char wifiPassword3[32];    // backup wifi Pass 3
+  char wifiSsid4[32];        // backup wifi SSID 4
+  char wifiPassword4[32];    // backup wifi Pass 4
                              // == settings version 13
   uint8_t threading;         // 0 - off, 1 - on
   int8_t speedCorrection;    // -5 to +5

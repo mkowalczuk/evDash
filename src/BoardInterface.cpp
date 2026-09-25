@@ -236,10 +236,19 @@ void BoardInterface::loadSettings()
   tmpStr.toCharArray(liveData->settings.traccarServerHost, tmpStr.length() + 1);
   liveData->settings.traccarServerPort = 5055;
   // v25
-  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
   liveData->settings.relayForMobileEnabled = 0;
   liveData->settings.relayToken[0] = '\0';
   liveData->settings.relayMobileId[0] = '\0';
+  // v26
+  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
+  tmpStr = "empty";
+  tmpStr.toCharArray(liveData->settings.wifiSsid3, tmpStr.length() + 1);
+  tmpStr = "not_set";
+  tmpStr.toCharArray(liveData->settings.wifiPassword3, tmpStr.length() + 1);
+  tmpStr = "empty";
+  tmpStr.toCharArray(liveData->settings.wifiSsid4, tmpStr.length() + 1);
+  tmpStr = "not_set";
+  tmpStr.toCharArray(liveData->settings.wifiPassword4, tmpStr.length() + 1);
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -435,10 +444,22 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 24)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 25;
         liveData->tmpSettings.relayForMobileEnabled = 0;
         liveData->tmpSettings.relayToken[0] = '\0';
         liveData->tmpSettings.relayMobileId[0] = '\0';
+      }
+      if (liveData->tmpSettings.settingsVersion == 25)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        tmpStr = "empty";
+        tmpStr.toCharArray(liveData->tmpSettings.wifiSsid3, tmpStr.length() + 1);
+        tmpStr = "not_set";
+        tmpStr.toCharArray(liveData->tmpSettings.wifiPassword3, tmpStr.length() + 1);
+        tmpStr = "empty";
+        tmpStr.toCharArray(liveData->tmpSettings.wifiSsid4, tmpStr.length() + 1);
+        tmpStr = "not_set";
+        tmpStr.toCharArray(liveData->tmpSettings.wifiPassword4, tmpStr.length() + 1);
       }
 
       // Save upgraded structure
@@ -466,6 +487,10 @@ void BoardInterface::loadSettings()
   EVDASH_TERMINATE_FIELD(abrpApiToken);
   EVDASH_TERMINATE_FIELD(wifiSsid2);
   EVDASH_TERMINATE_FIELD(wifiPassword2);
+  EVDASH_TERMINATE_FIELD(wifiSsid3);
+  EVDASH_TERMINATE_FIELD(wifiPassword3);
+  EVDASH_TERMINATE_FIELD(wifiSsid4);
+  EVDASH_TERMINATE_FIELD(wifiPassword4);
   EVDASH_TERMINATE_FIELD(obd2Name);
   EVDASH_TERMINATE_FIELD(obd2WifiIp);
   EVDASH_TERMINATE_FIELD(contributeToken);
@@ -697,6 +722,26 @@ bool BoardInterface::customConsoleCommand(String cmd)
     value.toCharArray(liveData->settings.wifiPassword2, sizeof(liveData->settings.wifiPassword2));
     return true;
   }
+  if (key.equalsIgnoreCase("wifiSsid3"))
+  {
+    value.toCharArray(liveData->settings.wifiSsid3, sizeof(liveData->settings.wifiSsid3));
+    return true;
+  }
+  if (key.equalsIgnoreCase("wifiPassword3"))
+  {
+    value.toCharArray(liveData->settings.wifiPassword3, sizeof(liveData->settings.wifiPassword3));
+    return true;
+  }
+  if (key.equalsIgnoreCase("wifiSsid4"))
+  {
+    value.toCharArray(liveData->settings.wifiSsid4, sizeof(liveData->settings.wifiSsid4));
+    return true;
+  }
+  if (key.equalsIgnoreCase("wifiPassword4"))
+  {
+    value.toCharArray(liveData->settings.wifiPassword4, sizeof(liveData->settings.wifiPassword4));
+    return true;
+  }
   if (key.equalsIgnoreCase("remoteApiUrl"))
   {
     value.toCharArray(liveData->settings.remoteApiUrl, sizeof(liveData->settings.remoteApiUrl));
@@ -741,6 +786,13 @@ bool BoardInterface::customConsoleCommand(String cmd)
   }
 
   //
+  if (key.equalsIgnoreCase("abrpDebug"))
+  {
+    liveData->params.abrpDebug = (value.toInt() != 0);
+    syslog->print("ABRP debug logging: ");
+    syslog->println(liveData->params.abrpDebug ? "enabled" : "disabled");
+    return true;
+  }
   if (key.equalsIgnoreCase("debugLevel"))
   {
     liveData->settings.debugLevel = value.toInt();
@@ -914,32 +966,35 @@ bool BoardInterface::serializeParamsToJson(String &outJson, bool inclApiKey)
  */
 void BoardInterface::showNet()
 {
-  String prefix = "", suffix = "";
-
   syslog->print("wifiSsid:  ");
   syslog->println(liveData->settings.wifiSsid);
 
   if (liveData->settings.backupWifiEnabled == 1)
   {
-    syslog->println("Backup wifi exists");
     syslog->print("wifiSsid2: ");
     syslog->println(liveData->settings.wifiSsid2);
   }
-  else
+  if (strlen(liveData->settings.wifiSsid3) > 0 && strcmp(liveData->settings.wifiSsid3, "empty") != 0)
   {
-    syslog->println("No wifi backup configured");
+    syslog->print("wifiSsid3: ");
+    syslog->println(liveData->settings.wifiSsid3);
   }
-  if (liveData->params.isWifiBackupLive == true)
+  if (strlen(liveData->settings.wifiSsid4) > 0 && strcmp(liveData->settings.wifiSsid4, "empty") != 0)
   {
-    suffix = "backup";
-  }
-  else
-  {
-    suffix = "main";
+    syslog->print("wifiSsid4: ");
+    syslog->println(liveData->settings.wifiSsid4);
   }
 
+  String activeStr = "main";
+  if (liveData->params.wifiActiveIndex == 1)
+    activeStr = "2nd AP (SSID2)";
+  else if (liveData->params.wifiActiveIndex == 2)
+    activeStr = "3rd AP (SSID3)";
+  else if (liveData->params.wifiActiveIndex == 3)
+    activeStr = "4th AP (SSID4)";
+
   syslog->print("Active: ");
-  syslog->println(suffix);
+  syslog->println(activeStr);
   syslog->print("IP-Address: ");
   syslog->println(WiFi.localIP().toString());
 }
@@ -961,6 +1016,52 @@ void BoardInterface::showTime()
   {
     syslog->println("Current time: not set");
   }
+}
+
+/**
+ * Show console commands help
+ */
+void BoardInterface::showHelp()
+{
+  syslog->println("");
+  syslog->println(".-[ HELP: Console commands ]-_.");
+  syslog->println("help           ... show console commands help (aliases: commands, ?)");
+  syslog->println("reboot         ... reboot device");
+  syslog->println("shutdown       ... shutdown device");
+  syslog->println("saveSettings   ... save current settings");
+  syslog->println("factoryReset   ... reset settings to defaults");
+  syslog->println("ipconfig       ... print network settings");
+  syslog->println("ABRP_debug     ... print ABRP user token");
+  syslog->println("abrpDebug=n    [n = 0..1]  ... enable/disable verbose ABRP debug logging");
+  syslog->println("debugLevel=n   [n = 0..4]  ... set debug level all, gps, comm, ...");
+  syslog->println("wifiSsid=x     ... set primary AP ssid");
+  syslog->println("wifiPassword=x ... set primary AP password");
+  syslog->println("wifiSsid2=x    ... set 2nd AP ssid (replace primary wifi automatically in 1-2 minutes)");
+  syslog->println("wifiPassword2=x... set 2nd AP password");
+  syslog->println("wifiSsid3=x    ... set 3rd AP ssid");
+  syslog->println("wifiPassword3=x... set 3rd AP password");
+  syslog->println("wifiSsid4=x    ... set 4th AP ssid");
+  syslog->println("wifiPassword4=x... set 4th AP password");
+  syslog->println("abrpApiToken=x ... set abrp api token for live data");
+  syslog->println("remoteApiUrl=x ... set remote api url");
+  syslog->println("remoteApiKey=x ... set remote api key");
+  syslog->println("mqttServer=x   ... set Mqtt server");
+  syslog->println("mqttId=x       ... set Mqtt id");
+  syslog->println("mqttUsername=x ... set Mqtt username");
+  syslog->println("mqttPassword=x ... set Mqtt password");
+  syslog->println("mqttPubTopic=x ... set Mqtt publish topic");
+  syslog->println("serviceUUID=x  ... set device uuid for obd2 ble adapter");
+  syslog->println("charTxUUID=x   ... set tx uuid for obd2 ble adapter");
+  syslog->println("charRxUUID=x   ... set rx uuid for obd2 ble adapter");
+  syslog->println("obd2ip=x       ... set ip for obd2 wifi adapter");
+  syslog->println("obd2port=x     ... set port for obd2 wifi adapter");
+  syslog->println("time           ... print current time");
+  syslog->println("ntpSync        ... sync Time with pool.ntp.org");
+  syslog->println("setTime=2022-12-30 05:00:00  ... set current time");
+  syslog->println("record=n       [n = 1..4]  ... record can response to buffer 1..4");
+  syslog->println("compare        ... compare buffers");
+  syslog->println("test=x         ... test handler");
+  syslog->println("__________________________________________________");
 }
 
 /**
@@ -1020,45 +1121,4 @@ void BoardInterface::calcAutomaticBrightnessLatLon()
       setBrightness();
     }
   }
-}
-
-/**
- * Show console commands help
- */
-void BoardInterface::showHelp()
-{
-  syslog->println("");
-  syslog->println(".-[ HELP: Console commands ]-_.");
-  syslog->println("help           ... show console commands help (aliases: commands, ?)");
-  syslog->println("reboot         ... reboot device");
-  syslog->println("shutdown       ... shutdown device");
-  syslog->println("saveSettings   ... save current settings");
-  syslog->println("factoryReset   ... reset settings to defaults");
-  syslog->println("ipconfig       ... print network settings");
-  syslog->println("ABRP_debug     ... print ABRP user token");
-  syslog->println("debugLevel=n   [n = 0..4]  ... set debug level all, gps, comm, ...");
-  syslog->println("wifiSsid=x     ... set primary AP ssid");
-  syslog->println("wifiPassword=x ... set primary AP password");
-  syslog->println("wifiSsid2=x    ... set backup AP ssid (replace primary wifi automatically in 1-2 minutes)");
-  syslog->println("wifiPassword2=x... set backup AP password");
-  syslog->println("abrpApiToken=x ... set abrp api token for live data");
-  syslog->println("remoteApiUrl=x ... set remote api url");
-  syslog->println("remoteApiKey=x ... set remote api key");
-  syslog->println("mqttServer=x   ... set Mqtt server");
-  syslog->println("mqttId=x       ... set Mqtt id");
-  syslog->println("mqttUsername=x ... set Mqtt username");
-  syslog->println("mqttPassword=x ... set Mqtt password");
-  syslog->println("mqttPubTopic=x ... set Mqtt publish topic");
-  syslog->println("serviceUUID=x  ... set device uuid for obd2 ble adapter");
-  syslog->println("charTxUUID=x   ... set tx uuid for obd2 ble adapter");
-  syslog->println("charRxUUID=x   ... set rx uuid for obd2 ble adapter");
-  syslog->println("obd2ip=x       ... set ip for obd2 wifi adapter");
-  syslog->println("obd2port=x     ... set port for obd2 wifi adapter");
-  syslog->println("time           ... print current time");
-  syslog->println("ntpSync        ... sync Time with pool.ntp.org");
-  syslog->println("setTime=2022-12-30 05:00:00  ... set current time");
-  syslog->println("record=n       [n = 1..4]  ... record can response to buffer 1..4");
-  syslog->println("compare        ... compare buffers");
-  syslog->println("test=x         ... test handler");
-  syslog->println("__________________________________________________");
 }

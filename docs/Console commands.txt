@@ -4,10 +4,16 @@ shutdown			    	    shutdown device
 saveSettings			    save current settings
 ipconfig			        print network settings
 debugLevel=n   [n = 0..3]	set debug level all, gps, comm, ...
+ABRP_debug				print ABRP user token
+abrpDebug=n    [n = 0..1]	enable/disable verbose ABRP debug logging (default 0)
 wifiSsid=x			        set primary AP ssid
 wifiPassword=x			    set primary AP password
-wifiSsid2=x			        set backup AP ssid (replace primary wifi automatically in 1-2 minutes)
-wifiPassword2=x			    set backup AP password
+wifiSsid2=x			        set 2nd AP ssid (replace primary wifi automatically in 1-2 minutes)
+wifiPassword2=x			    set 2nd AP password
+wifiSsid3=x			        set 3rd AP ssid
+wifiPassword3=x			    set 3rd AP password
+wifiSsid4=x			        set 4th AP ssid
+wifiPassword4=x			    set 4th AP password
 abrpApiToken=x			    set abrp api token for live data
 gprsApn=x			        set gprs (sim800l) apn
 remoteApiUrl=x			    set remote api url
