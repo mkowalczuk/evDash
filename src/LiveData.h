@@ -55,6 +55,33 @@
 #define CAR_SKODA_CITIGO_E_IV 32
 #define CAR_VW_EUP_36 33
 #define CAR_SEAT_MII_ELECTRIC_36 34
+#define CAR_XPENG 38
+#define CAR_XPENG_G6_66 39
+#define CAR_XPENG_G6_88 40
+#define CAR_XPENG_G9_78 41
+#define CAR_XPENG_G9_93 38
+#define CAR_XPENG_P7_60 42
+#define CAR_XPENG_P7_83 43
+#define CAR_XPENG_P7PLUS_75 44
+#define CAR_XPENG_P5_66 45
+#define CAR_XPENG_G3_66 46
+#define CAR_XPENG_X9_85 47
+#define CAR_XPENG_X9_101 48
+
+inline bool isCarTypeXpeng(int carType)
+{
+  return carType == CAR_XPENG ||
+         carType == CAR_XPENG_G6_66 ||
+         carType == CAR_XPENG_G6_88 ||
+         carType == CAR_XPENG_G9_78 ||
+         carType == CAR_XPENG_P7_60 ||
+         carType == CAR_XPENG_P7_83 ||
+         carType == CAR_XPENG_P7PLUS_75 ||
+         carType == CAR_XPENG_P5_66 ||
+         carType == CAR_XPENG_G3_66 ||
+         carType == CAR_XPENG_X9_85 ||
+         carType == CAR_XPENG_X9_101;
+}
 
 // COMM TYPE
 #define COMM_TYPE_OBD2_BLE4 0
@@ -267,7 +294,7 @@ typedef struct
   float tireRearRightTempC;
   float tireRearRightPressureBar;
   uint16_t cellCount;
-  float cellVoltage[200]; // 1..192 has index 0..191
+  float cellVoltage[224]; // 1..212 has index 0..211
 
   // Screen - charging graph
   float chargingGraphMinKw[101];             // 0..100% .. Min power Kw
@@ -284,13 +311,12 @@ typedef struct
   time_t soc10time[11]; // time for avg speed
 
   // additional
-  /*
-    uint8_t bmsMainRelay;
-    uint8_t highVoltageCharging;
-    float inverterCapacitorVoltage;
-    float normalChargePort;
-    float rapidChargePort;
-    ;*/
+  float normalChargePort; // AC slow charge port max temp (°C)
+  float rapidChargePort;  // DC fast charge port max temp (°C)
+  float chargerVoltage;   // External charger station voltage (V)
+  float chargerCurrent;   // External charger station current (A)
+  float motor1TorqueNm;   // Front motor torque request (Nm)
+  float motor2TorqueNm;   // Rear motor torque request (Nm)
 } PARAMS_STRUC;
 
 // Setting stored to flash

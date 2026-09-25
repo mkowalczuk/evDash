@@ -50,6 +50,17 @@ namespace
     {CAR_SEAT_MII_ELECTRIC_36, "seat:mii:20:36:other", "seat_mii_electric_36"},
     {CAR_PEUGEOT_E208, "peugeot:e208:20:50", "peugeot_e208"},
     {CAR_BMW_I3_2014, "bmw:i3:14:22:other", "bmwi3_2014_22"},
+    {CAR_XPENG, "xpeng:g9:22:93:other", "xpeng_g9_93"},
+    {CAR_XPENG_G6_66, "xpeng:g6:23:66:other", "xpeng_g6_66"},
+    {CAR_XPENG_G6_88, "xpeng:g6:23:87:other", "xpeng_g6_88"},
+    {CAR_XPENG_G9_78, "xpeng:g9:22:78:other", "xpeng_g9_78"},
+    {CAR_XPENG_P7_60, "xpeng:p7:20:60:other", "xpeng_p7_60"},
+    {CAR_XPENG_P7_83, "xpeng:p7:20:83:other", "xpeng_p7_83"},
+    {CAR_XPENG_P7PLUS_75, "xpeng:p7plus:24:75:other", "xpeng_p7plus_75"},
+    {CAR_XPENG_P5_66, "xpeng:p5:21:66:other", "xpeng_p5_66"},
+    {CAR_XPENG_G3_66, "xpeng:g3:20:66:other", "xpeng_g3_66"},
+    {CAR_XPENG_X9_85, "xpeng:x9:24:84:other", "xpeng_x9_85"},
+    {CAR_XPENG_X9_101, "xpeng:x9:24:101:other", "xpeng_x9_101"},
     };
 }
 

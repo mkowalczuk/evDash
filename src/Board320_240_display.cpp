@@ -214,10 +214,12 @@ void Board320_240::drawSceneSpeed()
       sprintf(tmpStr3, "%02ld:%02ld", (diffTime / 60), diffTime % 60);
     sprDrawString(tmpStr3, 200, posy);
     posy += 24;
-    sprintf(tmpStr3, (liveData->params.batVoltage == -1000) ? "n/a V" : "%01.01f V", liveData->params.batVoltage);
+    float showV = (liveData->params.batVoltage > 0) ? liveData->params.batVoltage : ((liveData->params.chargerVoltage > 0) ? liveData->params.chargerVoltage : -1000.0f);
+    sprintf(tmpStr3, (showV == -1000.0f) ? "n/a V" : "%01.01f V", showV);
     sprDrawString(tmpStr3, 200, posy);
     posy += 24;
-    sprintf(tmpStr3, (liveData->params.batPowerAmp == -1000) ? "n/a A" : "%01.01f A", liveData->params.batPowerAmp);
+    float showA = (liveData->params.batPowerAmp != -1000.0f) ? liveData->params.batPowerAmp : ((liveData->params.chargerCurrent > 0) ? liveData->params.chargerCurrent : -1000.0f);
+    sprintf(tmpStr3, (showA == -1000.0f) ? "n/a A" : "%01.01f A", showA);
     sprDrawString(tmpStr3, 200, posy);
     posy += 24;
     if (diffTime > 5)
@@ -305,6 +307,14 @@ void Board320_240::drawSceneSpeed()
     spr.setTextColor(bmsStateColor);
     sprintf(tmpStr1, "%s %01.00f", liveData->getBatteryManagementModeStr(liveData->params.batteryManagementMode).c_str(),
             liveData->celsius2temperature(liveData->params.coolingWaterTempC));
+    sprDrawString(tmpStr1, 319 - posx, posy);
+    spr.setTextColor(TFT_WHITE);
+  }
+  else if (liveData->params.chargingOn && (liveData->params.rapidChargePort > -50.0f || liveData->params.normalChargePort > -50.0f))
+  {
+    float portTemp = (liveData->params.rapidChargePort > -50.0f) ? liveData->params.rapidChargePort : liveData->params.normalChargePort;
+    spr.setTextColor((portTemp > 65.0f) ? TFT_RED : TFT_CYAN);
+    sprintf(tmpStr1, "PORT %01.00fC", liveData->celsius2temperature(portTemp));
     sprDrawString(tmpStr1, 319 - posx, posy);
     spr.setTextColor(TFT_WHITE);
   }
@@ -443,13 +453,40 @@ void Board320_240::drawSceneSpeed()
     sprDrawString(tempUnitSmall, 319, cellMinTextY + smallUnitYOffsetPx);
     sprSetFont(fontRobotoThin24);
   }
-  if (liveData->params.motor1Rpm > 0 || liveData->params.motor2Rpm > 0)
+  if (liveData->params.motor1Rpm > 0 && liveData->params.motor2Rpm > 0)
   {
-    sprintf(tmpStr3, "%01.01f/%01.01f", (liveData->params.motor1Rpm / 1000), (liveData->params.motor2Rpm / 1000));
+    sprintf(tmpStr3, "%01.01f/%01.01f", (liveData->params.motor1Rpm / 1000.0f), (liveData->params.motor2Rpm / 1000.0f));
     sprDrawString(tmpStr3, 304, 26);
     sprSetFont(fontFont2);
     sprDrawString("kr", 319, 34);
     sprSetFont(fontRobotoThin24);
+    if (liveData->params.motor1TorqueNm > -500.0f || liveData->params.motor2TorqueNm > -500.0f)
+    {
+      sprSetFont(fontFont2);
+      sprintf(tmpStr2, "%01.00f/%01.00fNm",
+              (liveData->params.motor1TorqueNm > -500.0f) ? liveData->params.motor1TorqueNm : 0.0f,
+              (liveData->params.motor2TorqueNm > -500.0f) ? liveData->params.motor2TorqueNm : 0.0f);
+      sprDrawString(tmpStr2, 319, 44);
+      sprSetFont(fontRobotoThin24);
+    }
+  }
+  else if (liveData->params.motor1Rpm > 0 || liveData->params.motor2Rpm > 0)
+  {
+    float rpm = (liveData->params.motor1Rpm > 0) ? liveData->params.motor1Rpm : liveData->params.motor2Rpm;
+    sprintf(tmpStr3, "%01.01f", (rpm / 1000.0f));
+    sprDrawString(tmpStr3, 304, 26);
+    sprSetFont(fontFont2);
+    sprDrawString("kr", 319, 34);
+    sprSetFont(fontRobotoThin24);
+    float tq = (liveData->params.motor1TorqueNm > -500.0f) ? liveData->params.motor1TorqueNm : liveData->params.motor2TorqueNm;
+    if (tq > -500.0f)
+    {
+      sprintf(tmpStr2, "%01.00f", tq);
+      sprDrawString(tmpStr2, 252, 26);
+      sprSetFont(fontFont2);
+      sprDrawString("Nm", 270, 34);
+      sprSetFont(fontRobotoThin24);
+    }
   }
   else if (liveData->params.outdoorTemperature != -100)
   {
@@ -755,6 +792,13 @@ void Board320_240::batteryCellsPageMove(bool forward)
  */
 uint8_t Board320_240::debugInfoPageCount()
 {
+  if (isCarTypeXpeng(liveData->settings.carType) ||
+      liveData->params.motor2Rpm > 0 ||
+      liveData->params.motor1TorqueNm > -500.0f ||
+      liveData->params.chargerVoltage > 0)
+  {
+    return 4;
+  }
   return 3;
 }
 
@@ -905,8 +949,9 @@ void Board320_240::drawSceneChargingGraph()
     }
   }
 
-  // Round up maxKw to the next multiple of 10
-  maxKw = ((maxKw + 9) / 10) * 10;
+  // Round up maxKw to the next appropriate multiple
+  int roundBase = (maxKw > 400) ? 50 : ((maxKw > 200) ? 20 : 10);
+  maxKw = ((maxKw + (roundBase - 1)) / roundBase) * roundBase;
   // Recalculate the Y-axis multiplier based on the actual maxKw
   mulY = 160.0f / maxKw;
 
@@ -916,14 +961,41 @@ void Board320_240::drawSceneChargingGraph()
   sprintf(tmpStr1, "%01.00f", liveData->params.socPerc);
   drawSmallCell(0, 0, 1, 1, tmpStr1, "SOC", TFT_TEMP, TFT_CYAN);
 
-  sprintf(tmpStr1, "%01.01f", liveData->params.batPowerKw);
+  if (liveData->params.batPowerKw > 0)
+    sprintf(tmpStr1, "%01.01f", liveData->params.batPowerKw);
+  else if (liveData->params.chargerVoltage > 0 && liveData->params.chargerCurrent > 0)
+    sprintf(tmpStr1, "%01.01f", (liveData->params.chargerVoltage * liveData->params.chargerCurrent) / 1000.0f);
+  else
+    sprintf(tmpStr1, "%01.01f", (liveData->params.batPowerKw == -1000.0f) ? 0.0f : liveData->params.batPowerKw);
   drawSmallCell(1, 0, 1, 1, tmpStr1, "POWER kW", TFT_TEMP, TFT_CYAN);
 
-  sprintf(tmpStr1, "%01.01f", liveData->params.batPowerAmp);
-  drawSmallCell(2, 0, 1, 1, tmpStr1, "CURRENT A", TFT_TEMP, TFT_CYAN);
+  if (liveData->params.chargerCurrent > 0)
+  {
+    if (liveData->params.batPowerAmp > 0)
+      sprintf(tmpStr1, "%01.00f/%01.00f", liveData->params.batPowerAmp, liveData->params.chargerCurrent);
+    else
+      sprintf(tmpStr1, "%01.01f", liveData->params.chargerCurrent);
+    drawSmallCell(2, 0, 1, 1, tmpStr1, (liveData->params.batPowerAmp > 0) ? "BAT/STN A" : "STATION A", TFT_TEMP, TFT_CYAN);
+  }
+  else
+  {
+    sprintf(tmpStr1, "%01.01f", (liveData->params.batPowerAmp == -1000.0f) ? 0.0f : liveData->params.batPowerAmp);
+    drawSmallCell(2, 0, 1, 1, tmpStr1, "CURRENT A", TFT_TEMP, TFT_CYAN);
+  }
 
-  sprintf(tmpStr1, "%03.00f", liveData->params.batVoltage);
-  drawSmallCell(3, 0, 1, 1, tmpStr1, "VOLTAGE", TFT_TEMP, TFT_CYAN);
+  if (liveData->params.chargerVoltage > 0)
+  {
+    if (liveData->params.batVoltage > 0)
+      sprintf(tmpStr1, "%01.00f/%01.00f", liveData->params.batVoltage, liveData->params.chargerVoltage);
+    else
+      sprintf(tmpStr1, "%03.00f", liveData->params.chargerVoltage);
+    drawSmallCell(3, 0, 1, 1, tmpStr1, (liveData->params.batVoltage > 0) ? "BAT/STN V" : "STATION V", TFT_TEMP, TFT_CYAN);
+  }
+  else
+  {
+    sprintf(tmpStr1, "%03.00f", (liveData->params.batVoltage > 0) ? liveData->params.batVoltage : 0.0f);
+    drawSmallCell(3, 0, 1, 1, tmpStr1, "VOLTAGE", TFT_TEMP, TFT_CYAN);
+  }
 
   // Temperature related cells
   sprintf(tmpStr1, ((liveData->settings.temperatureUnit == 'c') ? "%01.00f%cC" : "%01.01f%cF"),
@@ -938,9 +1010,19 @@ void Board320_240::drawSceneChargingGraph()
           liveData->celsius2temperature(liveData->params.batMinC), char(127));
   drawSmallCell(2, 1, 1, 1, tmpStr1, "BAT.MIN", (liveData->params.batMinC >= 15) ? ((liveData->params.batMinC >= 25) ? TFT_DARKGREEN2 : TFT_BLUE) : TFT_RED, TFT_CYAN);
 
-  sprintf(tmpStr1, ((liveData->settings.temperatureUnit == 'c') ? "%01.00f%cC" : "%01.01f%cF"),
-          liveData->celsius2temperature(liveData->params.outdoorTemperature), char(127));
-  drawSmallCell(3, 1, 1, 1, tmpStr1, "OUT.TEMP.", TFT_TEMP, TFT_CYAN);
+  if (liveData->params.rapidChargePort > -50.0f || liveData->params.normalChargePort > -50.0f)
+  {
+    float pTemp = (liveData->params.rapidChargePort > -50.0f) ? liveData->params.rapidChargePort : liveData->params.normalChargePort;
+    sprintf(tmpStr1, ((liveData->settings.temperatureUnit == 'c') ? "%01.00f%cC" : "%01.01f%cF"),
+            liveData->celsius2temperature(pTemp), char(127));
+    drawSmallCell(3, 1, 1, 1, tmpStr1, "PORT TEMP", (pTemp > 65.0f) ? TFT_RED : TFT_TEMP, (pTemp > 65.0f) ? TFT_RED : TFT_CYAN);
+  }
+  else
+  {
+    sprintf(tmpStr1, ((liveData->settings.temperatureUnit == 'c') ? "%01.00f%cC" : "%01.01f%cF"),
+            liveData->celsius2temperature(liveData->params.outdoorTemperature), char(127));
+    drawSmallCell(3, 1, 1, 1, tmpStr1, "OUT.TEMP.", TFT_TEMP, TFT_CYAN);
+  }
 
   spr.setTextColor(TFT_SILVER);
   sprSetFont(fontFont2);
@@ -952,16 +1034,17 @@ void Board320_240::drawSceneChargingGraph()
     spr.drawFastVLine(zeroX + (i * mulX), zeroY - (maxKw * mulY), maxKw * mulY, color);
   }
 
-  // Draw horizontal grid lines every 10kW (Y-axis)
+  // Draw horizontal grid lines (Y-axis) with adaptive step for high-power charging (e.g. 525kW)
   spr.setTextDatum(ML_DATUM);
   const int16_t rightYAxisLabelOffsetX = -2;
-  for (int i = 0; i <= maxKw; i += (maxKw > 150 ? 20 : 10))
+  int stepKw = (maxKw > 400) ? 100 : ((maxKw > 250) ? 50 : ((maxKw > 150) ? 20 : 10));
+  for (int i = 0; i <= maxKw; i += stepKw)
   {
-    color = ((i % 50) == 0 || i == 0) ? TFT_DARKRED : TFT_DARKRED2;
+    color = ((stepKw >= 50 && (i % 100) == 0) || (stepKw < 50 && (i % 50) == 0) || i == 0) ? TFT_DARKRED : TFT_DARKRED2;
     spr.drawFastHLine(zeroX, zeroY - (i * mulY), 100 * mulX, color);
 
     sprintf(tmpStr1, "%d", i);
-    sprDrawString(tmpStr1, zeroX + (100 * mulX) + (i > 100 ? 0 : 3) + rightYAxisLabelOffsetX, zeroY - (i * mulY));
+    sprDrawString(tmpStr1, zeroX + (100 * mulX) + (i >= 100 ? 0 : 3) + rightYAxisLabelOffsetX, zeroY - (i * mulY));
   }
 
   // Draw real-time values (temperature and kW lines)
@@ -1273,43 +1356,17 @@ void Board320_240::drawSceneDebug()
 
     snprintf(tmpStr1, sizeof(tmpStr1), "NET %s FAIL %u VOLT %s", liveData->params.netAvailable ? "OK" : "DOWN", liveData->params.netFailureCount, onOff(liveData->settings.voltmeterEnabled == 1));
     drawLine(tmpStr1);
+
+    if (liveData->params.chargerVoltage > 0 || liveData->params.chargerCurrent > 0 || liveData->params.rapidChargePort > -50.0f)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "STN %.0fV %.1fA PORT %.0fC",
+               (liveData->params.chargerVoltage > 0) ? liveData->params.chargerVoltage : 0.0f,
+               (liveData->params.chargerCurrent > 0) ? liveData->params.chargerCurrent : 0.0f,
+               (liveData->params.rapidChargePort > -50.0f) ? liveData->params.rapidChargePort : liveData->params.normalChargePort);
+      drawLine(tmpStr1, TFT_CYAN);
+    }
   }
-  else if (debugInfoPage == 2)
-  {
-    // IMU / Sentry motion wake diagnostics
-    drawLine("IMU MOTION WAKE", TFT_WHITE);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "GYR %.1f %.1f %.1f dps", liveData->params.imuGyroX, liveData->params.imuGyroY, liveData->params.imuGyroZ);
-    drawLine(tmpStr1);
-
-    const float accMag = sqrt(liveData->params.imuAccX * liveData->params.imuAccX +
-                              liveData->params.imuAccY * liveData->params.imuAccY +
-                              liveData->params.imuAccZ * liveData->params.imuAccZ);
-    snprintf(tmpStr1, sizeof(tmpStr1), "ACC %.2f %.2f %.2f g", liveData->params.imuAccX, liveData->params.imuAccY, liveData->params.imuAccZ);
-    drawLine(tmpStr1);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "MAG %.3fg DEV %.3fg", accMag, fabs(accMag - 1.0));
-    drawLine(tmpStr1, (fabs(accMag - 1.0) > 0.09) ? TFT_CYAN : TFT_SILVER);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "THRESH 12dps / 0.09g");
-    drawLine(tmpStr1);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "MOTION CNT %lu", static_cast<unsigned long>(liveData->params.imuMotionCount));
-    drawLine(tmpStr1, TFT_CYAN);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "WAKE ALLOW %s LOCK %s", onOff(liveData->settings.voltmeterEnabled == 0), onOff(liveData->params.motionWakeLocked));
-    drawLine(tmpStr1);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "WAKE CNT GPS %u GYRO %u", liveData->params.gpsWakeCount, liveData->params.gyroWakeCount);
-    drawLine(tmpStr1);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "CELLS %u TEMPS %u", liveData->params.cellCount, liveData->params.batModuleTempCount);
-    drawLine(tmpStr1);
-
-    snprintf(tmpStr1, sizeof(tmpStr1), "QUEUE %s", liveData->params.stopCommandQueue ? "STOP (SENTRY)" : "RUN");
-    drawLine(tmpStr1);
-  }
-  else
+  else if (debugInfoPage == 1)
   {
     if (liveData->settings.gpsHwSerialPort <= 2)
       snprintf(tmpStr1, sizeof(tmpStr1), "GPS %s UART%u %lu", gpsModule, liveData->settings.gpsHwSerialPort, static_cast<unsigned long>(liveData->settings.gpsSerialPortSpeed));
@@ -1352,5 +1409,124 @@ void Board320_240::drawSceneDebug()
 
     drawLine(dateLine);
     drawLine(timeLine);
+  }
+  else if (debugInfoPage == 2)
+  {
+    // IMU / Sentry motion wake diagnostics
+    drawLine("IMU MOTION WAKE", TFT_WHITE);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "GYR %.1f %.1f %.1f dps", liveData->params.imuGyroX, liveData->params.imuGyroY, liveData->params.imuGyroZ);
+    drawLine(tmpStr1);
+
+    const float accMag = sqrt(liveData->params.imuAccX * liveData->params.imuAccX +
+                              liveData->params.imuAccY * liveData->params.imuAccY +
+                              liveData->params.imuAccZ * liveData->params.imuAccZ);
+    snprintf(tmpStr1, sizeof(tmpStr1), "ACC %.2f %.2f %.2f g", liveData->params.imuAccX, liveData->params.imuAccY, liveData->params.imuAccZ);
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "MAG %.3fg DEV %.3fg", accMag, fabs(accMag - 1.0));
+    drawLine(tmpStr1, (fabs(accMag - 1.0) > 0.09) ? TFT_CYAN : TFT_SILVER);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "THRESH 12dps / 0.09g");
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "MOTION CNT %lu", static_cast<unsigned long>(liveData->params.imuMotionCount));
+    drawLine(tmpStr1, TFT_CYAN);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "WAKE ALLOW %s LOCK %s", onOff(liveData->settings.voltmeterEnabled == 0), onOff(liveData->params.motionWakeLocked));
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "WAKE CNT GPS %u GYRO %u", liveData->params.gpsWakeCount, liveData->params.gyroWakeCount);
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "CELLS %u TEMPS %u", liveData->params.cellCount, liveData->params.batModuleTempCount);
+    drawLine(tmpStr1);
+
+    snprintf(tmpStr1, sizeof(tmpStr1), "QUEUE %s", liveData->params.stopCommandQueue ? "STOP (SENTRY)" : "RUN");
+    drawLine(tmpStr1);
+  }
+  else
+  {
+    // Powertrain & Charging diagnostics (debugInfoPage == 3)
+    drawLine("POWERTRAIN & CHARGER", TFT_WHITE);
+
+    // Front & Rear motor RPM
+    if (liveData->params.motor1Rpm > 0 && liveData->params.motor2Rpm > 0)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "RPM F %.0f R %.0f", liveData->params.motor1Rpm, liveData->params.motor2Rpm);
+      drawLine(tmpStr1);
+    }
+    else if (liveData->params.motor1Rpm > 0)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "RPM %.0f", liveData->params.motor1Rpm);
+      drawLine(tmpStr1);
+    }
+    else if (liveData->params.motor2Rpm > 0)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "RPM R %.0f", liveData->params.motor2Rpm);
+      drawLine(tmpStr1);
+    }
+
+    // Front & Rear motor Torque (Nm)
+    if (liveData->params.motor1TorqueNm > -500.0f && liveData->params.motor2TorqueNm > -500.0f)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "TQ F %.1f R %.1f Nm", liveData->params.motor1TorqueNm, liveData->params.motor2TorqueNm);
+      drawLine(tmpStr1);
+    }
+    else if (liveData->params.motor1TorqueNm > -500.0f)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "TQ %.1f Nm", liveData->params.motor1TorqueNm);
+      drawLine(tmpStr1);
+    }
+    else if (liveData->params.motor2TorqueNm > -500.0f)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "TQ R %.1f Nm", liveData->params.motor2TorqueNm);
+      drawLine(tmpStr1);
+    }
+
+    // Station voltage & current
+    if (liveData->params.chargerVoltage > 0 || liveData->params.chargerCurrent > 0)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "STN %.1fV %.1fA",
+               (liveData->params.chargerVoltage > 0) ? liveData->params.chargerVoltage : 0.0f,
+               (liveData->params.chargerCurrent > 0) ? liveData->params.chargerCurrent : 0.0f);
+      drawLine(tmpStr1, TFT_CYAN);
+
+      if (liveData->params.chargerVoltage > 0 && liveData->params.chargerCurrent > 0)
+      {
+        float stnKw = (liveData->params.chargerVoltage * liveData->params.chargerCurrent) / 1000.0f;
+        snprintf(tmpStr1, sizeof(tmpStr1), "STN PWR %.1fkW", stnKw);
+        drawLine(tmpStr1, TFT_CYAN);
+      }
+    }
+
+    // Charge port temperatures
+    if (liveData->params.rapidChargePort > -50.0f || liveData->params.normalChargePort > -50.0f)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "PORT DC %s AC %s",
+               (liveData->params.rapidChargePort > -50.0f) ? (String((int)round(liveData->params.rapidChargePort)) + "C").c_str() : "n/a",
+               (liveData->params.normalChargePort > -50.0f) ? (String((int)round(liveData->params.normalChargePort)) + "C").c_str() : "n/a");
+      drawLine(tmpStr1);
+    }
+
+    // Battery pack voltage & current from BMS
+    snprintf(tmpStr1, sizeof(tmpStr1), "BAT %.1fV %.1fA %.1fkW",
+             (liveData->params.batVoltage > 0) ? liveData->params.batVoltage : 0.0f,
+             (liveData->params.batPowerAmp != -1000.0f) ? liveData->params.batPowerAmp : 0.0f,
+             (liveData->params.batPowerKw != -1000.0f) ? liveData->params.batPowerKw : 0.0f);
+    drawLine(tmpStr1);
+
+    // Coolant temperatures
+    snprintf(tmpStr1, sizeof(tmpStr1), "COOL MOT %s BAT %s",
+             (liveData->params.motorTempC > -100.0f) ? (String((int)round(liveData->params.motorTempC)) + "C").c_str() : "n/a",
+             (liveData->params.coolingWaterTempC > -100.0f) ? (String((int)round(liveData->params.coolingWaterTempC)) + "C").c_str() : "n/a");
+    drawLine(tmpStr1);
+
+    // Inverter temp
+    if (liveData->params.inverterTempC > -100.0f)
+    {
+      snprintf(tmpStr1, sizeof(tmpStr1), "INV TEMP %.0fC", liveData->params.inverterTempC);
+      drawLine(tmpStr1);
+    }
   }
 }

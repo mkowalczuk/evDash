@@ -518,6 +518,16 @@ void EvDashMobileRelay::sendSnapshot()
   json += ",\"brakeLights\":" + jsonBool(p.brakeLights);
   json += ",\"frontRpm\":" + jsonNumber(p.motor1Rpm, 0);
   json += ",\"rearRpm\":" + jsonNumber(p.motor2Rpm, 0);
+  json += ",\"frontTqNm\":" + jsonNumber(p.motor1TorqueNm, 1);
+  json += ",\"rearTqNm\":" + jsonNumber(p.motor2TorqueNm, 1);
+  json += ",\"portDcTempC\":";
+  json += (p.rapidChargePort > -50.0f) ? jsonNumber(p.rapidChargePort, 0) : "null";
+  json += ",\"portAcTempC\":";
+  json += (p.normalChargePort > -50.0f) ? jsonNumber(p.normalChargePort, 0) : "null";
+  json += ",\"stationV\":";
+  json += (p.chargerVoltage > 0.0f) ? jsonNumber(p.chargerVoltage, 1) : "null";
+  json += ",\"stationA\":";
+  json += (p.chargerCurrent > 0.0f) ? jsonNumber(p.chargerCurrent, 1) : "null";
   // TPMS — convert bar -> kPa (Flutter side expects kPa). null when sensor
   // hasn't reported yet (firmware uses 0/-99 sentinels) so the iPhone shows
   // "--" instead of a bogus 0.

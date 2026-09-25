@@ -56,6 +56,7 @@
 #include "CarVWID3.h"
 #include "CarVWUpMii.h"
 #include "CarPeugeotE208.h"
+#include "CarXpeng.h"
 #include "EvDashMobileRelay.h"
 
 // Board, Car, Livedata (params, settings)
@@ -239,6 +240,19 @@ void setup(void)
     break;
   case CAR_PEUGEOT_E208:
     car = new CarPeugeotE208();
+    break;
+  case CAR_XPENG:
+  case CAR_XPENG_G6_66:
+  case CAR_XPENG_G6_88:
+  case CAR_XPENG_G9_78:
+  case CAR_XPENG_P7_60:
+  case CAR_XPENG_P7_83:
+  case CAR_XPENG_P7PLUS_75:
+  case CAR_XPENG_P5_66:
+  case CAR_XPENG_G3_66:
+  case CAR_XPENG_X9_85:
+  case CAR_XPENG_X9_101:
+    car = new CarXpeng();
     break;
   default:
     car = new CarKiaEniro();

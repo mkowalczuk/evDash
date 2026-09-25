@@ -157,6 +157,12 @@ void LiveData::initParams()
   params.bmsUnknownTempB = -100;
   params.bmsUnknownTempC = -100;
   params.bmsUnknownTempD = -100;
+  params.normalChargePort = -100;
+  params.rapidChargePort = -100;
+  params.chargerVoltage = -1;
+  params.chargerCurrent = -1000;
+  params.motor1TorqueNm = -1000;
+  params.motor2TorqueNm = -1000;
   params.batteryManagementMode = BAT_MAN_MODE_NOT_IMPLEMENTED;
   params.auxPerc = -1;
   params.auxCurrentAmp = -1000;
@@ -177,8 +183,8 @@ void LiveData::initParams()
     params.soc10ced[i] = params.soc10cec[i] = params.soc10odo[i] = -1;
     params.soc10time[i] = 0;
   }
-  for (int i = 0; i < 200; i++)
-  { // id3 58kWh = 108 cells
+  for (int i = 0; i < 224; i++)
+  { // id3 58kWh = 108 cells, xpeng g9 = 212 cells
     params.cellVoltage[i] = -1;
   }
   params.cellCount = 0;

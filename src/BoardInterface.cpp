@@ -809,6 +809,8 @@ namespace
     jsonData["speedKmh"] = liveData->params.speedKmh;
     jsonData["motorRpm"] = liveData->params.motor1Rpm;
     jsonData["motor2Rpm"] = liveData->params.motor2Rpm;
+    jsonData["motorTqNm"] = liveData->params.motor1TorqueNm;
+    jsonData["motor2TqNm"] = liveData->params.motor2TorqueNm;
     jsonData["odoKm"] = liveData->params.odoKm;
 
     if (liveData->params.batEnergyContent != 1)
@@ -842,6 +844,14 @@ namespace
     jsonData["tmpB"] = round(liveData->params.bmsUnknownTempB);
     jsonData["tmpC"] = round(liveData->params.bmsUnknownTempC);
     jsonData["tmpD"] = round(liveData->params.bmsUnknownTempD);
+    if (liveData->params.normalChargePort > -50.0f)
+      jsonData["chgPortAc"] = round(liveData->params.normalChargePort);
+    if (liveData->params.rapidChargePort > -50.0f)
+      jsonData["chgPortDc"] = round(liveData->params.rapidChargePort);
+    if (liveData->params.chargerVoltage > 0.0f)
+      jsonData["chgV"] = liveData->params.chargerVoltage;
+    if (liveData->params.chargerCurrent > 0.0f)
+      jsonData["chgA"] = liveData->params.chargerCurrent;
 
     jsonData["invC"] = round(liveData->params.inverterTempC);
     jsonData["motC"] = round(liveData->params.motorTempC);

@@ -175,6 +175,39 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
   case VEHICLE_TYPE_PEUGEOT_E208:
     prefix = (liveData->settings.carType == CAR_PEUGEOT_E208) ? ">" : "";
     break;
+  case VEHICLE_TYPE_XPENG_G6_66:
+    prefix = (liveData->settings.carType == CAR_XPENG_G6_66) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_G6_88:
+    prefix = (liveData->settings.carType == CAR_XPENG_G6_88) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_G9_78:
+    prefix = (liveData->settings.carType == CAR_XPENG_G9_78) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_G9_93:
+    prefix = (liveData->settings.carType == CAR_XPENG_G9_93) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_P7_60:
+    prefix = (liveData->settings.carType == CAR_XPENG_P7_60) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_P7_83:
+    prefix = (liveData->settings.carType == CAR_XPENG_P7_83) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_P7PLUS_75:
+    prefix = (liveData->settings.carType == CAR_XPENG_P7PLUS_75) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_P5_66:
+    prefix = (liveData->settings.carType == CAR_XPENG_P5_66) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_G3_66:
+    prefix = (liveData->settings.carType == CAR_XPENG_G3_66) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_X9_85:
+    prefix = (liveData->settings.carType == CAR_XPENG_X9_85) ? ">" : "";
+    break;
+  case VEHICLE_TYPE_XPENG_X9_101:
+    prefix = (liveData->settings.carType == CAR_XPENG_X9_101) ? ">" : "";
+    break;
   //
   case MENU_ADAPTER_CAN_COMMU:
     prefix = (liveData->settings.commType == COMM_TYPE_CAN_COMMU) ? ">" : "";
@@ -1075,6 +1108,61 @@ void Board320_240::menuItemClick()
       break;
     case VEHICLE_TYPE_PEUGEOT_E208:
       liveData->settings.carType = CAR_PEUGEOT_E208;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_G6_66:
+      liveData->settings.carType = CAR_XPENG_G6_66;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_G6_88:
+      liveData->settings.carType = CAR_XPENG_G6_88;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_G9_78:
+      liveData->settings.carType = CAR_XPENG_G9_78;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_G9_93:
+      liveData->settings.carType = CAR_XPENG_G9_93;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_P7_60:
+      liveData->settings.carType = CAR_XPENG_P7_60;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_P7_83:
+      liveData->settings.carType = CAR_XPENG_P7_83;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_P7PLUS_75:
+      liveData->settings.carType = CAR_XPENG_P7PLUS_75;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_P5_66:
+      liveData->settings.carType = CAR_XPENG_P5_66;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_G3_66:
+      liveData->settings.carType = CAR_XPENG_G3_66;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_X9_85:
+      liveData->settings.carType = CAR_XPENG_X9_85;
+      showMenu();
+      return;
+      break;
+    case VEHICLE_TYPE_XPENG_X9_101:
+      liveData->settings.carType = CAR_XPENG_X9_101;
       showMenu();
       return;
       break;
