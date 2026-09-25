@@ -546,51 +546,140 @@ void BoardInterface::afterSetup()
 }
 
 /**
+ * Process incoming serial console characters continuously.
+ */
+void BoardInterface::processSerialConsole()
+{
+  while (syslog != nullptr && syslog->available())
+  {
+    int ch = syslog->read();
+    if (ch == '\r' || ch == '\n')
+    {
+      consoleBuffer.trim();
+      if (consoleBuffer.length() > 0)
+      {
+        bool handled = customConsoleCommand(consoleBuffer);
+        if (!handled && commInterface != nullptr && !commInterface->isSuspended() && !liveData->params.stopCommandQueue)
+        {
+          commInterface->executeCommand(consoleBuffer + "\r");
+        }
+      }
+      consoleBuffer = "";
+    }
+    else if (ch == '\b' || ch == 127)
+    {
+      if (consoleBuffer.length() > 0)
+      {
+        consoleBuffer.remove(consoleBuffer.length() - 1);
+      }
+    }
+    else if (ch >= 32 && ch <= 126)
+    {
+      consoleBuffer += (char)ch;
+    }
+  }
+}
+
+/**
  * Custom commands
  */
-void BoardInterface::customConsoleCommand(String cmd)
+bool BoardInterface::customConsoleCommand(String cmd)
 {
-  if (cmd.equals("reboot"))
+  cmd.trim();
+  if (cmd.length() == 0)
+    return false;
+
+  if (cmd.equalsIgnoreCase("help") || cmd.equalsIgnoreCase("commands") || cmd.equals("?"))
+  {
+    showHelp();
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("reboot"))
+  {
     ESP.restart();
-  if (cmd.equals("saveSettings"))
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("saveSettings"))
+  {
     saveSettings();
-  if (cmd.equals("factoryReset"))
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("factoryReset"))
+  {
     resetSettings();
-  if (cmd.equals("time"))
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("time"))
+  {
     showTime();
-  if (cmd.equals("ntpSync"))
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("ntpSync"))
+  {
     ntpSync();
-  if (cmd.equals("ipconfig"))
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("ipconfig"))
+  {
     showNet();
-  if (cmd.equals("ABRP_debug"))
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("ABRP_debug"))
+  {
     syslog->println(liveData->settings.abrpApiToken);
-  if (cmd.equals("shutdown"))
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("shutdown"))
+  {
     enterSleepMode(0);
+    return true;
+  }
   // CAN comparer
-  if (cmd.equals("compare"))
-    commInterface->compareCanRecords();
+  if (cmd.equalsIgnoreCase("compare"))
+  {
+    if (commInterface != nullptr)
+      commInterface->compareCanRecords();
+    return true;
+  }
 
   int8_t idx = cmd.indexOf("=");
   if (idx == -1)
-    return;
+    return false;
 
   String key = cmd.substring(0, idx);
   String value = cmd.substring(idx + 1);
+  key.trim();
+  value.trim();
 
   // Bounded to destination size (truncates + NUL-terminates); an over-length value
   // would otherwise overflow into adjacent settings fields (issue #123).
-  if (key == "serviceUUID")
+  if (key.equalsIgnoreCase("serviceUUID"))
+  {
     value.toCharArray(liveData->settings.serviceUUID, sizeof(liveData->settings.serviceUUID));
-  if (key == "charTxUUID")
+    return true;
+  }
+  if (key.equalsIgnoreCase("charTxUUID"))
+  {
     value.toCharArray(liveData->settings.charTxUUID, sizeof(liveData->settings.charTxUUID));
-  if (key == "charRxUUID")
+    return true;
+  }
+  if (key.equalsIgnoreCase("charRxUUID"))
+  {
     value.toCharArray(liveData->settings.charRxUUID, sizeof(liveData->settings.charRxUUID));
+    return true;
+  }
 
-  if (key == "wifiSsid")
+  if (key.equalsIgnoreCase("wifiSsid"))
+  {
     value.toCharArray(liveData->settings.wifiSsid, sizeof(liveData->settings.wifiSsid));
-  if (key == "wifiPassword")
+    return true;
+  }
+  if (key.equalsIgnoreCase("wifiPassword"))
+  {
     value.toCharArray(liveData->settings.wifiPassword, sizeof(liveData->settings.wifiPassword));
-  if (key == "wifiSsid2")
+    return true;
+  }
+  if (key.equalsIgnoreCase("wifiSsid2"))
   {
     value.toCharArray(liveData->settings.wifiSsid2, sizeof(liveData->settings.wifiSsid2));
     if (strcmp(liveData->settings.wifiSsid2, "empty") == 0)
@@ -601,47 +690,83 @@ void BoardInterface::customConsoleCommand(String cmd)
     {
       liveData->settings.backupWifiEnabled = 1;
     }
+    return true;
   }
-  if (key == "wifiPassword2")
+  if (key.equalsIgnoreCase("wifiPassword2"))
+  {
     value.toCharArray(liveData->settings.wifiPassword2, sizeof(liveData->settings.wifiPassword2));
-  if (key == "remoteApiUrl")
+    return true;
+  }
+  if (key.equalsIgnoreCase("remoteApiUrl"))
+  {
     value.toCharArray(liveData->settings.remoteApiUrl, sizeof(liveData->settings.remoteApiUrl));
-  if (key == "remoteApiKey")
+    return true;
+  }
+  if (key.equalsIgnoreCase("remoteApiKey"))
+  {
     value.toCharArray(liveData->settings.remoteApiKey, sizeof(liveData->settings.remoteApiKey));
-  if (key == "abrpApiToken")
+    return true;
+  }
+  if (key.equalsIgnoreCase("abrpApiToken"))
+  {
     value.toCharArray(liveData->settings.abrpApiToken, sizeof(liveData->settings.abrpApiToken));
+    return true;
+  }
 
   // Mqtt
-  if (key == "mqttServer")
+  if (key.equalsIgnoreCase("mqttServer"))
+  {
     value.toCharArray(liveData->settings.mqttServer, sizeof(liveData->settings.mqttServer));
-  if (key == "mqttId")
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttId"))
+  {
     value.toCharArray(liveData->settings.mqttId, sizeof(liveData->settings.mqttId));
-  if (key == "mqttUsername")
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttUsername"))
+  {
     value.toCharArray(liveData->settings.mqttUsername, sizeof(liveData->settings.mqttUsername));
-  if (key == "mqttPassword")
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttPassword"))
+  {
     value.toCharArray(liveData->settings.mqttPassword, sizeof(liveData->settings.mqttPassword));
-  if (key == "mqttPubTopic")
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttPubTopic"))
+  {
     value.toCharArray(liveData->settings.mqttPubTopic, sizeof(liveData->settings.mqttPubTopic));
+    return true;
+  }
 
   //
-  if (key == "debugLevel")
+  if (key.equalsIgnoreCase("debugLevel"))
   {
     liveData->settings.debugLevel = value.toInt();
     syslog->setDebugLevel(liveData->settings.debugLevel);
+    return true;
   }
-  if (key == "setTime")
+  if (key.equalsIgnoreCase("setTime"))
   {
     setTime(value);
+    return true;
   }
   // CAN comparer
-  if (key == "record")
+  if (key.equalsIgnoreCase("record"))
   {
-    commInterface->recordLoop(value.toInt());
+    if (commInterface != nullptr)
+      commInterface->recordLoop(value.toInt());
+    return true;
   }
-  if (key == "test")
+  if (key.equalsIgnoreCase("test"))
   {
-    carInterface->testHandler(value);
+    if (carInterface != nullptr)
+      carInterface->testHandler(value);
+    return true;
   }
+
+  return false;
 }
 
 /**
@@ -885,4 +1010,45 @@ void BoardInterface::calcAutomaticBrightnessLatLon()
       setBrightness();
     }
   }
+}
+
+/**
+ * Show console commands help
+ */
+void BoardInterface::showHelp()
+{
+  syslog->println("");
+  syslog->println(".-[ HELP: Console commands ]-_.");
+  syslog->println("help           ... show console commands help (aliases: commands, ?)");
+  syslog->println("reboot         ... reboot device");
+  syslog->println("shutdown       ... shutdown device");
+  syslog->println("saveSettings   ... save current settings");
+  syslog->println("factoryReset   ... reset settings to defaults");
+  syslog->println("ipconfig       ... print network settings");
+  syslog->println("ABRP_debug     ... print ABRP user token");
+  syslog->println("debugLevel=n   [n = 0..4]  ... set debug level all, gps, comm, ...");
+  syslog->println("wifiSsid=x     ... set primary AP ssid");
+  syslog->println("wifiPassword=x ... set primary AP password");
+  syslog->println("wifiSsid2=x    ... set backup AP ssid (replace primary wifi automatically in 1-2 minutes)");
+  syslog->println("wifiPassword2=x... set backup AP password");
+  syslog->println("abrpApiToken=x ... set abrp api token for live data");
+  syslog->println("remoteApiUrl=x ... set remote api url");
+  syslog->println("remoteApiKey=x ... set remote api key");
+  syslog->println("mqttServer=x   ... set Mqtt server");
+  syslog->println("mqttId=x       ... set Mqtt id");
+  syslog->println("mqttUsername=x ... set Mqtt username");
+  syslog->println("mqttPassword=x ... set Mqtt password");
+  syslog->println("mqttPubTopic=x ... set Mqtt publish topic");
+  syslog->println("serviceUUID=x  ... set device uuid for obd2 ble adapter");
+  syslog->println("charTxUUID=x   ... set tx uuid for obd2 ble adapter");
+  syslog->println("charRxUUID=x   ... set rx uuid for obd2 ble adapter");
+  syslog->println("obd2ip=x       ... set ip for obd2 wifi adapter");
+  syslog->println("obd2port=x     ... set port for obd2 wifi adapter");
+  syslog->println("time           ... print current time");
+  syslog->println("ntpSync        ... sync Time with pool.ntp.org");
+  syslog->println("setTime=2022-12-30 05:00:00  ... set current time");
+  syslog->println("record=n       [n = 1..4]  ... record can response to buffer 1..4");
+  syslog->println("compare        ... compare buffers");
+  syslog->println("test=x         ... test handler");
+  syslog->println("__________________________________________________");
 }

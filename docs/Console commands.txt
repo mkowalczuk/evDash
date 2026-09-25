@@ -1,5 +1,6 @@
+help				        show console commands help (aliases: commands, ?)
 reboot				        reboot device
-reboot			    	    shutdown device
+shutdown			    	    shutdown device
 saveSettings			    save current settings
 ipconfig			        print network settings
 debugLevel=n   [n = 0..3]	set debug level all, gps, comm, ...

@@ -58,9 +58,7 @@ void BoardM5stackCoreS3::initBoard()
   // CoreS3.Power.SetLDOEnable(2, true);
   // CoreS3.Power.set SetDCDC3(false);
   CoreS3.Speaker.end();
-  CoreS3.Touch.begin(&CoreS3.Display);
-  CoreS3.Rtc.begin();
-  CoreS3.Imu.begin(); // Gyro
+  // CoreS3.begin(cfg) already initializes Display, Touch, Rtc, and Imu
 
   Board320_240::initBoard();
 }

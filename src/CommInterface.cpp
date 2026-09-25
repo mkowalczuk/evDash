@@ -69,30 +69,7 @@ void CommInterface::mainLoop()
 {
   const bool queueSuspended = liveData->params.stopCommandQueue || suspendedDevice;
 
-  // Send command from TTY to OBD2
-  if (syslog->available())
-  {
-    ch = syslog->read();
-    if (ch == '\r' || ch == '\n')
-    {
-      board->customConsoleCommand(response);
-
-      // raise dump noo needed, work is done by customConsoleCommand method
-      // Lubos: Not exactly. This is for AT/CAN commands via serial console.
-      // CustomConsoleCommand only process evDash command (reboot, savesetting, etd).
-      response = response + ch;
-      syslog->info(DEBUG_COMM, response);
-      if (!queueSuspended)
-      {
-        executeCommand(response);
-      }
-      response = "";
-    }
-    else
-    {
-      response = response + ch;
-    }
-  }
+  // Serial console commands are processed continuously via board->processSerialConsole()
 
   // Set start counters (odoKm, total charged, total discharged)
   if (liveData->params.odoKmStart == -1 && liveData->params.odoKm != -1)

@@ -1413,7 +1413,7 @@ void Board320_240::updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ,
  */
 void Board320_240::commLoop()
 {
-  if (liveData->params.stopCommandQueue || commInterface->isSuspended())
+  if (commInterface == nullptr || liveData->params.stopCommandQueue || commInterface->isSuspended())
   {
     return;
   }
@@ -1841,6 +1841,9 @@ void Board320_240::mainLoop()
   const uint32_t loopDurationMs = (millis() - mainLoopStart);
   displayFps = (loopDurationMs == 0 ? 0 : (1000.0f / loopDurationMs));
   mainLoopStart = millis();
+
+  // Serial console commands
+  processSerialConsole();
 
   // board loop
   boardLoop();
@@ -2453,6 +2456,7 @@ void Board320_240::mainLoop()
     const uint32_t idleWaitStartMs = millis();
     while (liveData->params.stopCommandQueue && (millis() - idleWaitStartMs) < 1000UL)
     {
+      processSerialConsole();
       delay(kSentryIdleSliceMs);
       boardLoop();
 

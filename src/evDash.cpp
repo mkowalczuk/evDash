@@ -120,6 +120,7 @@ void setup(void)
 
   // Serial console
   syslog = new LogSerial();
+  syslog->begin(115200);
   if (psramFound())
   {
     int tlsAllocRc = mbedtls_platform_set_calloc_free(evdashTlsCalloc, evdashTlsFree);
@@ -266,39 +267,8 @@ void setup(void)
   syslog->println("   ░       ░░   ░ ░  ░   ░   ▒   ░  ░  ░   ░  ░░ ░");
   syslog->println("   ░  ░     ░     ░          ░  ░      ░   ░  ░  ░");
   syslog->println("           ░    ░                                 ");
-  syslog->println("");
-  syslog->println(".-[ HELP: Console commands ]-_.");
-  syslog->println("reboot   ... reboot device");
-  syslog->println("shutdown ... shutdown device");
-  syslog->println("saveSettings   ... save current settings");
-  syslog->println("factoryReset   ... reset settings");
-  syslog->println("ipconfig   ... print network settings");
-  syslog->println("ABRP_debug   ... print ABRP user token");
-  syslog->println("debugLevel=n   [n = 0..4]  ... set debug level all, gps, comm, ...");
-  syslog->println("wifiSsid=x     ... set primary AP ssid");
-  syslog->println("wifiPassword=x     ... set primary AP password");
-  syslog->println("wifiSsid2=x     ... set backup AP ssid (replace primary wifi automatically in 1-2 minutes)");
-  syslog->println("wifiPassword2=x     ... set backup AP password");
-  syslog->println("abrpApiToken=x     ... set abrp api token for live data");
-  syslog->println("remoteApiUrl=x     ... set remote api url");
-  syslog->println("remoteApiKey=x     ... set remote api key");
-  syslog->println("mqttServer=x     ... set Mqtt server");
-  syslog->println("mqttId=x     ... set Mqtt id");
-  syslog->println("mqttUsername=x     ... set Mqtt username");
-  syslog->println("mqttPassword=x     ... set Mqtt password");
-  syslog->println("mqttPubTopic=x     ... set Mqtt publish topic");
-  syslog->println("serviceUUID=x     ... set device uuid for obd2 ble adapter");
-  syslog->println("charTxUUID=x     ... set tx uuid for obd2 ble adapter");
-  syslog->println("charRxUUID=x     ... set rx uuid for obd2 ble adapter");
-  syslog->println("obd2ip=x     ... set ip for obd2 wifi adapter");
-  syslog->println("obd2port=x     ... set port for obd2 wifi adapter");
-  syslog->println("time   ... print current time");
-  syslog->println("ntpSync   ... sync Time with pool.ntp.org");
-  syslog->println("setTime=2022-12-30 05:00:00  ... set current time");
-  syslog->println("record=n   [n = 1..4]  ... record can response to buffer 1..4");
-  syslog->println("compare      ... compare buffers");
-  syslog->println("test     ... test handler");
-  syslog->println("__________________________________________________");
+  syslog->println("Type 'help' for console commands.");
+  board->showHelp();
 }
 
 /**

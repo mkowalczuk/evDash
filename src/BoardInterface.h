@@ -12,6 +12,7 @@ protected:
   CarInterface *carInterface;
   CommInterface *commInterface;
   bool redrawScreenIsRunning = false;
+  String consoleBuffer = "";
 
 public:
   // Screens, buttons
@@ -38,6 +39,8 @@ public:
   bool carCommandAllowed() { return carInterface->commandAllowed(); }
   void showTime();
   void showNet();
+  void showHelp();
+  void processSerialConsole();
   virtual void setTime(String timestamp);
   virtual void setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds) = 0;
   virtual void ntpSync() = 0;
@@ -58,7 +61,7 @@ public:
   void saveSettings();
   void resetSettings();
   void loadSettings();
-  void customConsoleCommand(String cmd);
+  bool customConsoleCommand(String cmd);
   // Sdcard
   virtual bool sdcardMount() { return false; };
   virtual void sdcardToggleRecording() = 0;
