@@ -290,8 +290,10 @@ void BoardInterface::loadSettings()
   // v27
   liveData->settings.sdcardConsoleLogEnabled = 0;
   // v28
-  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
   generateRandomAlphanumeric(liveData->settings.webLogServerPassword, 8);
+  // v29
+  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
+  liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -511,8 +513,13 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 27)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 28;
         generateRandomAlphanumeric(liveData->tmpSettings.webLogServerPassword, 8);
+      }
+      if (liveData->tmpSettings.settingsVersion == 28)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
       }
 
       // Save upgraded structure
@@ -646,7 +653,7 @@ void BoardInterface::processSerialConsole()
         bool handled = customConsoleCommand(consoleBuffer);
         if (!handled && commInterface != nullptr && !commInterface->isSuspended() && !liveData->params.stopCommandQueue)
         {
-          commInterface->executeCommand(consoleBuffer + "\r");
+          commInterface->executeCommand(consoleBuffer);
         }
       }
       consoleBuffer = "";
@@ -723,6 +730,12 @@ bool BoardInterface::customConsoleCommand(String cmd)
   {
     syslog->print("AP password: ");
     syslog->println(liveData->settings.webLogServerPassword);
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("bleAddressType") || cmd.equalsIgnoreCase("bleAddrType"))
+  {
+    syslog->print("BLE MAC address type: ");
+    syslog->println((liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "PUBLIC (fallback RANDOM)" : "RANDOM (fallback PUBLIC)");
     return true;
   }
   // CAN comparer
@@ -823,6 +836,21 @@ bool BoardInterface::customConsoleCommand(String cmd)
     value.toCharArray(liveData->settings.webLogServerPassword, sizeof(liveData->settings.webLogServerPassword));
     syslog->print("AP password set to: ");
     syslog->println(liveData->settings.webLogServerPassword);
+    saveSettings();
+    return true;
+  }
+  if (key.equalsIgnoreCase("bleAddressType") || key.equalsIgnoreCase("bleAddrType"))
+  {
+    if (value.equalsIgnoreCase("public") || value.equalsIgnoreCase("1") || value.equalsIgnoreCase("pub"))
+    {
+      liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_PUBLIC;
+    }
+    else
+    {
+      liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
+    }
+    syslog->print("BLE MAC address type set to: ");
+    syslog->println((liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "PUBLIC (fallback RANDOM)" : "RANDOM (fallback PUBLIC)");
     saveSettings();
     return true;
   }
@@ -1139,6 +1167,8 @@ void BoardInterface::showHelp()
   syslog->println("serviceUUID=x  ... set device uuid for obd2 ble adapter");
   syslog->println("charTxUUID=x   ... set tx uuid for obd2 ble adapter");
   syslog->println("charRxUUID=x   ... set rx uuid for obd2 ble adapter");
+  syslog->println("bleAddressType ... print current BLE MAC address type");
+  syslog->println("bleAddressType=x ... set BLE MAC address type: random (0) or public (1)");
   syslog->println("obd2ip=x       ... set ip for obd2 wifi adapter");
   syslog->println("obd2port=x     ... set port for obd2 wifi adapter");
   syslog->println("time           ... print current time");

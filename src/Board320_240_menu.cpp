@@ -219,6 +219,9 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     sprintf(tmpStr1, "%s", liveData->settings.obd2Name);
     suffix = tmpStr1;
     break;
+  case MENU_ADAPTER_BLE_ADDR_TYPE:
+    suffix = (liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "[public]" : "[random]";
+    break;
   case MENU_ADAPTER_COMMAND_QUEUE_AUTOSTOP:
     suffix = (liveData->settings.commandQueueAutoStop == 0) ? "[off]" : "[on]";
     break;
@@ -1224,6 +1227,14 @@ void Board320_240::menuItemClick()
       return;
     }
     break;
+    case MENU_ADAPTER_BLE_ADDR_TYPE:
+      liveData->settings.bleAddressType = (liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_RANDOM)
+                                              ? BLE_ADDRESS_TYPE_PUBLIC
+                                              : BLE_ADDRESS_TYPE_RANDOM;
+      saveSettings();
+      showMenu();
+      return;
+      break;
     case MENU_ADAPTER_COMMAND_QUEUE_AUTOSTOP:
       liveData->settings.commandQueueAutoStop = (liveData->settings.commandQueueAutoStop == 1) ? 0 : 1;
       showMenu();
