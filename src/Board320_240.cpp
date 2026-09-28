@@ -2579,7 +2579,7 @@ void Board320_240::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t
   tm.tm_min = minute;
   tm.tm_sec = seconds;
   time_t t = mktime(&tm);
-  printf("%02d%02d%02d%02d%02d%02d\n", year - 2000, month, day, hour, minute, seconds);
+  syslog->printf("%02d%02d%02d%02d%02d%02d\n", year - 2000, month, day, hour, minute, seconds);
   struct timeval now = {.tv_sec = t};
   settimeofday(&now, NULL);
   syncTimes(t);
@@ -4962,7 +4962,7 @@ void Board320_240::netLoop()
       liveData->params.currentTime - liveData->params.lastRemoteApiSent > liveData->settings.remoteUploadIntervalSec)
   {
     liveData->params.lastRemoteApiSent = liveData->params.currentTime;
-    syslog->info(DEBUG_COMM, "Remote send tick");
+    syslog->info(DEBUG_NET, "Remote send tick");
     int64_t startTime = esp_timer_get_time();
     netSendData(false);
     int64_t endTime = esp_timer_get_time();
@@ -4975,7 +4975,7 @@ void Board320_240::netLoop()
     const uint32_t abrpIntervalMs = static_cast<uint32_t>(liveData->settings.remoteUploadAbrpIntervalSec) * 500;
     if (abrpIntervalMs > 0 && (lastAbrpSendAtMs == 0 || (millis() - lastAbrpSendAtMs) > abrpIntervalMs))
     {
-      syslog->info(DEBUG_COMM, "ABRP send tick");
+      syslog->info(DEBUG_ABRP, "ABRP send tick");
       int64_t startTime = esp_timer_get_time();
       netSendData(true);
       int64_t endTime = esp_timer_get_time();
@@ -4989,24 +4989,24 @@ void Board320_240::netLoop()
     const bool hasGpsFix = isGpsFixUsable(liveData);
     if (!hasGpsFix)
     {
-      syslog->println("Traccar send skipped: no GPS fix");
+      syslog->info(DEBUG_NET, "Traccar send skipped: no GPS fix");
     }
     if (hasGpsFix && (lastTraccarSendAtMs == 0 || (millis() - lastTraccarSendAtMs) > kTraccarIntervalMs))
     {
       const String traccarDeviceId = normalizeDeviceIdForApi(getTraccarDeviceIdFromEfuse());
       String traccarServerHost = String(liveData->settings.traccarServerHost);
       traccarServerHost.trim();
-      syslog->println("Traccar deviceId: " + traccarDeviceId);
+      syslog->info(DEBUG_NET, "Traccar deviceId: " + traccarDeviceId);
       bool sentOk = false;
       int httpCode = -1;
       if (traccarServerHost.length() == 0 || traccarServerHost == "empty")
       {
-        syslog->println("Traccar send skipped: no server host");
+        syslog->info(DEBUG_NET, "Traccar send skipped: no server host");
       }
       else
       {
         const uint16_t port = liveData->settings.traccarServerPort ? liveData->settings.traccarServerPort : 5055;
-        syslog->println("Traccar send tick (" + traccarServerHost + ":" + String(port) + ")");
+        syslog->info(DEBUG_NET, "Traccar send tick (" + traccarServerHost + ":" + String(port) + ")");
         sentOk = Traccar::sendPosition(traccarServerHost.c_str(),
                                        port,
                                        traccarDeviceId,
@@ -5029,7 +5029,7 @@ void Board320_240::netLoop()
       }
       else
       {
-        syslog->println("Traccar send failed, HTTP=" + String(httpCode));
+        syslog->info(DEBUG_NET, "Traccar send failed, HTTP=" + String(httpCode));
         updateNetAvailability(false);
       }
     }
@@ -5067,7 +5067,7 @@ void Board320_240::netLoop()
       contributeStatusSinceMs != 0 &&
       (millis() - contributeStatusSinceMs) >= kContributeWaitFallbackMs)
   {
-    syslog->println("contributeStatus ... waiting timeout fallback to ready");
+    syslog->info(DEBUG_NET, "contributeStatus ... waiting timeout fallback to ready");
     liveData->params.contributeStatus = CONTRIBUTE_READY_TO_SEND;
   }
   if (netReady && liveData->settings.contributeData == 1 &&
@@ -5086,38 +5086,37 @@ bool Board320_240::netSendData(bool sendAbrp)
 {
   int64_t startTime2 = esp_timer_get_time();
   int rc = 0;
-  const bool netDebug = liveData->settings.debugLevel >= DEBUG_GSM;
   const bool wifiReady = (liveData->settings.wifiEnabled == 1 && WiFi.status() == WL_CONNECTED);
   const String contributeKey = ensureContributeKey();
   const String hardwareDeviceId = normalizeDeviceIdForApi(getHardwareDeviceId());
 
   if (liveData->params.socPerc < 0)
   {
-    syslog->println("No valid data, skipping data send");
+    syslog->info(sendAbrp ? DEBUG_ABRP : DEBUG_NET, "No valid data, skipping data send");
     return false;
   }
 
   // WIFI
   if (liveData->settings.remoteUploadModuleType == 1)
   {
-    syslog->println("Sending data to API - via WIFI");
+    syslog->info(DEBUG_NET, "Sending data to API - via WIFI");
   }
   else
   {
     if (liveData->settings.remoteUploadModuleType != 0)
     {
-      syslog->println("Unsupported module");
+      syslog->info(DEBUG_NET, "Unsupported module");
     }
     return false;
   }
 
   if (!wifiReady)
   {
-    syslog->println("WiFi not connected, skipping data send");
+    syslog->info(DEBUG_NET, "WiFi not connected, skipping data send");
     return false;
   }
 
-  syslog->println("Start HTTP POST...");
+  syslog->info(DEBUG_NET, "Start HTTP POST...");
 
   if (!sendAbrp && liveData->settings.remoteUploadIntervalSec != 0)
   {
@@ -5125,7 +5124,7 @@ bool Board320_240::netSendData(bool sendAbrp)
         strcmp(liveData->settings.remoteApiUrl, "not_set") == 0 ||
         strstr(liveData->settings.remoteApiUrl, "http") == nullptr)
     {
-      syslog->println("Remote API URL not set, skipping send");
+      syslog->info(DEBUG_NET, "Remote API URL not set, skipping send");
       return false;
     }
 
@@ -5172,23 +5171,16 @@ bool Board320_240::netSendData(bool sendAbrp)
     size_t payloadLen = measureJson(jsonData);
     if (payloadLen >= sizeof(payload))
     {
-      syslog->println("Remote API payload too large, skipping send");
+      syslog->info(DEBUG_NET, "Remote API payload too large, skipping send");
       return false;
     }
     serializeJson(jsonData, payload, sizeof(payload));
 
-    if (netDebug)
-    {
-      syslog->print("Sending payload: ");
-      syslog->println(payload);
+    syslog->infoNolf(DEBUG_NET, "Sending payload: ");
+    syslog->info(DEBUG_NET, payload);
 
-      syslog->print("Remote API server: ");
-      syslog->println(liveData->settings.remoteApiUrl);
-    }
-    else
-    {
-      syslog->println("Sending data to remote API");
-    }
+    syslog->infoNolf(DEBUG_NET, "Remote API server: ");
+    syslog->info(DEBUG_NET, liveData->settings.remoteApiUrl);
 
     // WIFI remote upload
     rc = 0;
@@ -5246,15 +5238,15 @@ bool Board320_240::netSendData(bool sendAbrp)
 
     if (rc == 200)
     {
-      syslog->println("HTTP POST send successful");
+      syslog->info(DEBUG_NET, "HTTP POST send successful");
       liveData->params.lastSuccessNetSendTime = liveData->params.currentTime;
       updateNetAvailability(true);
     }
     else
     {
       // Failed...
-      syslog->print("HTTP POST error: ");
-      syslog->println(rc);
+      syslog->infoNolf(DEBUG_NET, "HTTP POST error: ");
+      syslog->info(DEBUG_NET, rc);
       updateNetAvailability(false);
     }
   }
@@ -5264,7 +5256,7 @@ bool Board320_240::netSendData(bool sendAbrp)
         strcmp(liveData->settings.abrpApiToken, "empty") == 0 ||
         strcmp(liveData->settings.abrpApiToken, "not_set") == 0)
     {
-      syslog->println("ABRP token not set, skipping send");
+      syslog->info(DEBUG_ABRP, "ABRP token not set, skipping send");
       return false;
     }
 
@@ -5273,7 +5265,7 @@ bool Board320_240::netSendData(bool sendAbrp)
     jsonData["car_model"] = getCarModelAbrpStr(liveData->settings.carType);
     if (strcmp(jsonData["car_model"], "n/a") == 0)
     {
-      syslog->println("Car not supported by ABRP Uploader");
+      syslog->info(DEBUG_ABRP, "Car not supported by ABRP Uploader");
       return false;
     }
 
@@ -5333,18 +5325,18 @@ bool Board320_240::netSendData(bool sendAbrp)
     size_t payloadLength = serializeJson(jsonData, gAbrpPayloadBuffer, sizeof(gAbrpPayloadBuffer));
     if (payloadLength == 0)
     {
-      syslog->println("Failed to serialize ABRP payload");
+      syslog->info(DEBUG_ABRP, "Failed to serialize ABRP payload");
       return false;
     }
 
     const size_t payloadStringLength = strlen(gAbrpPayloadBuffer);
-    syslog->println("ABRP payload length (serializeJson): " + String(payloadLength));
-    syslog->println("ABRP payload length (strlen): " + String(payloadStringLength));
+    syslog->info(DEBUG_ABRP, "ABRP payload length (serializeJson): " + String(payloadLength));
+    syslog->info(DEBUG_ABRP, "ABRP payload length (strlen): " + String(payloadStringLength));
     if (payloadStringLength != payloadLength)
     {
-      syslog->println("ABRP payload length mismatch detected");
+      syslog->info(DEBUG_ABRP, "ABRP payload length mismatch detected");
     }
-    syslog->println("ABRP payload JSON: " + String(gAbrpPayloadBuffer));
+    syslog->info(DEBUG_ABRP, "ABRP payload JSON: " + String(gAbrpPayloadBuffer));
 
     if (liveData->settings.abrpSdcardLog != 0 && liveData->settings.remoteUploadAbrpIntervalSec > 0)
     {
@@ -5352,26 +5344,18 @@ bool Board320_240::netSendData(bool sendAbrp)
     }
 
     encodeQuotes(gAbrpEncodedPayloadBuffer, sizeof(gAbrpEncodedPayloadBuffer), gAbrpPayloadBuffer);
-    syslog->println("ABRP encoded payload length: " + String(strlen(gAbrpEncodedPayloadBuffer)));
+    syslog->info(DEBUG_ABRP, "ABRP encoded payload length: " + String(strlen(gAbrpEncodedPayloadBuffer)));
 
     int dtaLength = snprintf(gAbrpFormBuffer, sizeof(gAbrpFormBuffer), "api_key=%s&token=%s&tlm=%s", ABRP_API_KEY, liveData->settings.abrpApiToken, gAbrpEncodedPayloadBuffer);
     if (dtaLength < 0 || static_cast<size_t>(dtaLength) >= sizeof(gAbrpFormBuffer))
     {
-      syslog->println("ABRP payload too large, skipping send");
+      syslog->info(DEBUG_ABRP, "ABRP payload too large, skipping send");
       return false;
     }
 
-    syslog->println("ABRP form payload length: " + String(dtaLength));
-
-    if (netDebug)
-    {
-      syslog->print("Sending data: ");
-      syslog->println(gAbrpFormBuffer); // dta is total string sent to ABRP API including api-key and user-token (could be sensitive data to log)
-    }
-    else
-    {
-      syslog->println("Sending data to ABRP");
-    }
+    syslog->info(DEBUG_ABRP, "ABRP form payload length: " + String(dtaLength));
+    syslog->infoNolf(DEBUG_ABRP, "Sending data: ");
+    syslog->info(DEBUG_ABRP, gAbrpFormBuffer); // dta is total string sent to ABRP API including api-key and user-token (could be sensitive data to log)
 
     // Code for sending https data to ABRP api server
     rc = 0;
@@ -5398,24 +5382,24 @@ bool Board320_240::netSendData(bool sendAbrp)
       http.addHeader("Content-Type", "application/x-www-form-urlencoded");
       const size_t bodyLength = static_cast<size_t>(dtaLength);
       addWifiTransferredBytes(bodyLength);
-      syslog->println("ABRP POST body length: " + String(bodyLength));
+      syslog->info(DEBUG_ABRP, "ABRP POST body length: " + String(bodyLength));
       rc = http.POST((uint8_t *)gAbrpFormBuffer, bodyLength);
-      syslog->println("ABRP HTTP status: " + String(rc));
+      syslog->info(DEBUG_ABRP, "ABRP HTTP status: " + String(rc));
 
       if (rc == HTTP_CODE_OK)
       {
         // Request successful
         String payload = http.getString();
-        syslog->println("ABRP HTTP response body: " + payload);
+        syslog->info(DEBUG_ABRP, "ABRP HTTP response body: " + payload);
       }
       else
       {
         // Handle different HTTP status codes
-        syslog->println("HTTP Request failed with code: " + String(rc));
+        syslog->info(DEBUG_ABRP, "HTTP Request failed with code: " + String(rc));
         if (rc > 0)
         {
           String payload = http.getString();
-          syslog->println("ABRP HTTP error body: " + payload);
+          syslog->info(DEBUG_ABRP, "ABRP HTTP error body: " + payload);
         }
       }
 
@@ -5425,21 +5409,21 @@ bool Board320_240::netSendData(bool sendAbrp)
 
     if (rc == 200)
     {
-      syslog->println("HTTP POST send successful");
+      syslog->info(DEBUG_ABRP, "HTTP POST send successful");
       liveData->params.lastSuccessNetSendTime = liveData->params.currentTime;
       updateNetAvailability(true);
     }
     else
     {
       // Failed...
-      syslog->print("HTTP POST error: ");
-      syslog->println(rc);
+      syslog->infoNolf(DEBUG_ABRP, "HTTP POST error: ");
+      syslog->info(DEBUG_ABRP, rc);
       updateNetAvailability(false);
     }
   }
   else
   {
-    syslog->println("Well... This not gonna happen... (Board320_240::netSendData();)"); // Just for debug reasons...
+    syslog->info(DEBUG_NET, "Well... This not gonna happen... (Board320_240::netSendData();)"); // Just for debug reasons...
   }
   // next three rows are for time measurement of this function
   int64_t endTime2 = esp_timer_get_time();
@@ -5485,19 +5469,19 @@ void Board320_240::queueAbrpSdLog(const char *payload, size_t length, time_t cur
   File file = SD.open(liveData->params.sdcardAbrpFilename, FILE_APPEND);
   if (!file)
   {
-    syslog->println("Failed to open ABRP file for appending");
+    syslog->info(DEBUG_SDCARD, "Failed to open ABRP file for appending");
     file = SD.open(liveData->params.sdcardAbrpFilename, FILE_WRITE);
   }
   if (!file)
   {
-    syslog->println("Failed to create ABRP file");
+    syslog->info(DEBUG_SDCARD, "Failed to create ABRP file");
     return;
   }
 
   const size_t writeLen = file.write((const uint8_t *)payload, length);
   if (writeLen != length)
   {
-    syslog->println("ABRP SD write truncated");
+    syslog->info(DEBUG_SDCARD, "ABRP SD write truncated");
   }
   file.print(",\n");
   file.close();
@@ -5520,10 +5504,10 @@ bool Board320_240::netContributeData()
   if (liveData->settings.wifiEnabled == 1 && WiFi.status() == WL_CONNECTED &&
       liveData->params.contributeStatus == CONTRIBUTE_READY_TO_SEND)
   {
-    syslog->println("Contribute data...");
+    syslog->info(DEBUG_NET, "Contribute data...");
     if (isMobileRelayClientConnected())
     {
-      syslog->println("Contribute upload: mobile relay stays active");
+      syslog->info(DEBUG_NET, "Contribute upload: mobile relay stays active");
     }
     const char *contributeHost = "api.evdash.eu";
     const char *contributeUrl = "https://api.evdash.eu/v1/contribute";
@@ -5543,21 +5527,21 @@ bool Board320_240::netContributeData()
       payloadJson.reserve(4096);
       if (!buildContributePayloadV2(payloadJson, false))
       {
-        syslog->println("Failed to build contribute v2 payload");
+        syslog->info(DEBUG_NET, "Failed to build contribute v2 payload");
         scheduleNextContributeCycle();
         updateNetAvailability(false);
         return false;
       }
       if (isContributeV2SnapshotEffectivelyEmpty(liveData))
       {
-        syslog->println("Contribute v2 empty snapshot, skipping send");
+        syslog->info(DEBUG_NET, "Contribute v2 empty snapshot, skipping send");
         scheduleNextContributeCycle();
         return false;
       }
 
       if (payloadJson.length() < 2 || payloadJson.charAt(0) != '{' || payloadJson.charAt(payloadJson.length() - 1) != '}')
       {
-        syslog->println("Contribute payload invalid, skipping send");
+        syslog->info(DEBUG_NET, "Contribute payload invalid, skipping send");
         scheduleNextContributeCycle();
         updateNetAvailability(false);
         return false;
@@ -5566,30 +5550,30 @@ bool Board320_240::netContributeData()
       payloadForPost = allocContributePayloadBuffer(payloadForPostLen, payloadForPostInPsram);
       if (payloadForPost == nullptr)
       {
-        syslog->println("Contribute payload buffer allocation failed");
+        syslog->info(DEBUG_NET, "Contribute payload buffer allocation failed");
         scheduleNextContributeCycle();
         updateNetAvailability(false);
         return false;
       }
       memcpy(payloadForPost, payloadJson.c_str(), payloadForPostLen + 1);
     }
-    syslog->print("Contribute payload bytes: ");
-    syslog->println(payloadForPostLen);
-    syslog->print("Contribute payload buffer: ");
-    syslog->println(payloadForPostInPsram ? "psram" : "internal");
-    syslog->print("Heap intFree/intLargest/psram: ");
-    syslog->println(String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                    String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                    String(ESP.getFreePsram()));
+    syslog->infoNolf(DEBUG_NET, "Contribute payload bytes: ");
+    syslog->info(DEBUG_NET, payloadForPostLen);
+    syslog->infoNolf(DEBUG_NET, "Contribute payload buffer: ");
+    syslog->info(DEBUG_NET, payloadForPostInPsram ? "psram" : "internal");
 
     auto printContributeHeap = [&]()
     {
-      syslog->print("Heap intFree/intLargest/psram: ");
-      syslog->println(String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                      String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                      String(ESP.getFreePsram()));
+      if (!syslog->isDebug(DEBUG_NET))
+      {
+        return;
+      }
+      syslog->infoNolf(DEBUG_NET, "Heap intFree/intLargest/psram: ");
+      syslog->info(DEBUG_NET, String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
+                              String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
+                              String(ESP.getFreePsram()));
     };
-    syslog->println("Contribute TLS: BLE stays active");
+    syslog->info(DEBUG_NET, "Contribute TLS: BLE stays active");
     printContributeHeap();
 
     String responsePayload = "";
@@ -5612,9 +5596,9 @@ bool Board320_240::netContributeData()
       const bool beginOk = http.begin(client, contributeUrl);
       if (!beginOk)
       {
-        syslog->print("Contribute POST attempt ");
-        syslog->print(attemptNo);
-        syslog->println(": http.begin failed");
+        syslog->infoNolf(DEBUG_NET, "Contribute POST attempt ");
+        syslog->infoNolf(DEBUG_NET, attemptNo);
+        syslog->info(DEBUG_NET, ": http.begin failed");
         outResponse = "";
         return -1;
       }
@@ -5629,13 +5613,13 @@ bool Board320_240::netContributeData()
       addWifiTransferredBytes(payloadForPostLen);
       const int postRc = http.POST((uint8_t *)payloadForPost, payloadForPostLen);
       const uint32_t elapsedMs = millis() - startedMs;
-      syslog->print("Contribute POST attempt ");
-      syslog->print(attemptNo);
-      syslog->print(" rc=");
-      syslog->print(postRc);
-      syslog->print(" (");
-      syslog->print(elapsedMs);
-      syslog->println("ms)");
+      syslog->infoNolf(DEBUG_NET, "Contribute POST attempt ");
+      syslog->infoNolf(DEBUG_NET, attemptNo);
+      syslog->infoNolf(DEBUG_NET, " rc=");
+      syslog->infoNolf(DEBUG_NET, postRc);
+      syslog->infoNolf(DEBUG_NET, " (");
+      syslog->infoNolf(DEBUG_NET, elapsedMs);
+      syslog->info(DEBUG_NET, "ms)");
       outResponse = "";
       if (postRc > 0)
       {
@@ -5646,14 +5630,11 @@ bool Board320_240::netContributeData()
         char tlsErrBuf[160] = {0};
         lastTlsErrCode = client.lastError(tlsErrBuf, sizeof(tlsErrBuf));
         lastTlsErrText = String(tlsErrBuf);
-        syslog->print("Contribute TLS lastError: ");
-        syslog->print(lastTlsErrCode);
-        syslog->print(" ");
-        syslog->println(tlsErrBuf);
-        syslog->print("Heap intFree/intLargest/psram: ");
-        syslog->println(String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                        String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                        String(ESP.getFreePsram()));
+        syslog->infoNolf(DEBUG_NET, "Contribute TLS lastError: ");
+        syslog->infoNolf(DEBUG_NET, lastTlsErrCode);
+        syslog->infoNolf(DEBUG_NET, " ");
+        syslog->info(DEBUG_NET, tlsErrBuf);
+        printContributeHeap();
       }
       http.end();
       client.stop();
@@ -5678,15 +5659,15 @@ bool Board320_240::netContributeData()
         lastTlsErrCode = client.lastError(tlsErrBuf, sizeof(tlsErrBuf));
         lastTlsErrText = String(tlsErrBuf);
         const uint32_t elapsedMs = millis() - startedMs;
-        syslog->print("Contribute RAW TLS attempt ");
-        syslog->print(attemptNo);
-        syslog->print(" connect failed (");
-        syslog->print(elapsedMs);
-        syslog->println("ms)");
-        syslog->print("Contribute TLS lastError: ");
-        syslog->print(lastTlsErrCode);
-        syslog->print(" ");
-        syslog->println(tlsErrBuf);
+        syslog->infoNolf(DEBUG_NET, "Contribute RAW TLS attempt ");
+        syslog->infoNolf(DEBUG_NET, attemptNo);
+        syslog->infoNolf(DEBUG_NET, " connect failed (");
+        syslog->infoNolf(DEBUG_NET, elapsedMs);
+        syslog->info(DEBUG_NET, "ms)");
+        syslog->infoNolf(DEBUG_NET, "Contribute TLS lastError: ");
+        syslog->infoNolf(DEBUG_NET, lastTlsErrCode);
+        syslog->infoNolf(DEBUG_NET, " ");
+        syslog->info(DEBUG_NET, tlsErrBuf);
         client.stop();
         return -1;
       }
@@ -5704,10 +5685,10 @@ bool Board320_240::netContributeData()
       const size_t written = client.write((const uint8_t *)payloadForPost, payloadForPostLen);
       if (written != payloadForPostLen)
       {
-        syslog->print("Contribute RAW TLS payload short write: ");
-        syslog->print(written);
-        syslog->print("/");
-        syslog->println(payloadForPostLen);
+        syslog->infoNolf(DEBUG_NET, "Contribute RAW TLS payload short write: ");
+        syslog->infoNolf(DEBUG_NET, written);
+        syslog->infoNolf(DEBUG_NET, "/");
+        syslog->info(DEBUG_NET, payloadForPostLen);
       }
 
       String rawResponse = "";
@@ -5762,13 +5743,13 @@ bool Board320_240::netContributeData()
       }
 
       const uint32_t elapsedMs = millis() - startedMs;
-      syslog->print("Contribute RAW TLS attempt ");
-      syslog->print(attemptNo);
-      syslog->print(" rc=");
-      syslog->print(statusCode);
-      syslog->print(" (");
-      syslog->print(elapsedMs);
-      syslog->println("ms)");
+      syslog->infoNolf(DEBUG_NET, "Contribute RAW TLS attempt ");
+      syslog->infoNolf(DEBUG_NET, attemptNo);
+      syslog->infoNolf(DEBUG_NET, " rc=");
+      syslog->infoNolf(DEBUG_NET, statusCode);
+      syslog->infoNolf(DEBUG_NET, " (");
+      syslog->infoNolf(DEBUG_NET, elapsedMs);
+      syslog->info(DEBUG_NET, "ms)");
 
       client.stop();
       return statusCode;
@@ -5785,11 +5766,11 @@ bool Board320_240::netContributeData()
       if (!client.connect(contributeHost, 80, kContributeHttpConnectTimeoutMs))
       {
         const uint32_t elapsedMs = millis() - startedMs;
-        syslog->print("Contribute HTTP fallback attempt ");
-        syslog->print(attemptNo);
-        syslog->print(" connect failed (");
-        syslog->print(elapsedMs);
-        syslog->println("ms)");
+        syslog->infoNolf(DEBUG_NET, "Contribute HTTP fallback attempt ");
+        syslog->infoNolf(DEBUG_NET, attemptNo);
+        syslog->infoNolf(DEBUG_NET, " connect failed (");
+        syslog->infoNolf(DEBUG_NET, elapsedMs);
+        syslog->info(DEBUG_NET, "ms)");
         client.stop();
         return -1;
       }
@@ -5807,10 +5788,10 @@ bool Board320_240::netContributeData()
       const size_t written = client.write((const uint8_t *)payloadForPost, payloadForPostLen);
       if (written != payloadForPostLen)
       {
-        syslog->print("Contribute HTTP fallback payload short write: ");
-        syslog->print(written);
-        syslog->print("/");
-        syslog->println(payloadForPostLen);
+        syslog->infoNolf(DEBUG_NET, "Contribute HTTP fallback payload short write: ");
+        syslog->infoNolf(DEBUG_NET, written);
+        syslog->infoNolf(DEBUG_NET, "/");
+        syslog->info(DEBUG_NET, payloadForPostLen);
       }
 
       String rawResponse = "";
@@ -5865,13 +5846,13 @@ bool Board320_240::netContributeData()
       }
 
       const uint32_t elapsedMs = millis() - startedMs;
-      syslog->print("Contribute HTTP fallback attempt ");
-      syslog->print(attemptNo);
-      syslog->print(" rc=");
-      syslog->print(statusCode);
-      syslog->print(" (");
-      syslog->print(elapsedMs);
-      syslog->println("ms)");
+      syslog->infoNolf(DEBUG_NET, "Contribute HTTP fallback attempt ");
+      syslog->infoNolf(DEBUG_NET, attemptNo);
+      syslog->infoNolf(DEBUG_NET, " rc=");
+      syslog->infoNolf(DEBUG_NET, statusCode);
+      syslog->infoNolf(DEBUG_NET, " (");
+      syslog->infoNolf(DEBUG_NET, elapsedMs);
+      syslog->info(DEBUG_NET, "ms)");
 
       client.stop();
       return statusCode;
@@ -5879,23 +5860,23 @@ bool Board320_240::netContributeData()
 
     IPAddress resolvedHost;
     int dnsRc = WiFi.hostByName(contributeHost, resolvedHost);
-    syslog->print("Contribute DNS ");
-    syslog->print(contributeHost);
-    syslog->print(": ");
+    syslog->infoNolf(DEBUG_NET, "Contribute DNS ");
+    syslog->infoNolf(DEBUG_NET, contributeHost);
+    syslog->infoNolf(DEBUG_NET, ": ");
     if (dnsRc == 1)
     {
-      syslog->println(resolvedHost.toString());
+      syslog->info(DEBUG_NET, resolvedHost.toString());
     }
     else
     {
-      syslog->println("resolve_failed");
+      syslog->info(DEBUG_NET, "resolve_failed");
     }
 
     bool usedRawTlsFirst = false;
     if (dnsRc == 1)
     {
       usedRawTlsFirst = true;
-      syslog->println("Contribute HTTPS: raw TLS POST with SNI...");
+      syslog->info(DEBUG_NET, "Contribute HTTPS: raw TLS POST with SNI...");
       rc = postContributePayloadRawTls(responsePayload, resolvedHost, 1);
     }
     else
@@ -5906,28 +5887,30 @@ bool Board320_240::netContributeData()
     bool tlsMemIssue = isTlsMemoryIssue(lastTlsErrCode, lastTlsErrText);
     if (rc < 0)
     {
-      syslog->print("WiFi RSSI/ch/BSSID: ");
-      syslog->println(String(WiFi.RSSI()) + " / " + String(WiFi.channel()) + " / " + WiFi.BSSIDstr());
+      if (syslog->isDebug(DEBUG_NET))
+      {
+        syslog->info(DEBUG_NET, String("WiFi RSSI/ch/BSSID: ") + String(WiFi.RSSI()) + " / " + String(WiFi.channel()) + " / " + WiFi.BSSIDstr());
+      }
       if (dnsRc == 1 && kContributeEnableTcpProbe)
       {
         WiFiClient tcpProbe;
         const uint32_t tcpStartedMs = millis();
         const int tcpRc = tcpProbe.connect(resolvedHost, 443, 2000);
         const uint32_t tcpElapsedMs = millis() - tcpStartedMs;
-        syslog->print("Contribute TCP probe ");
-        syslog->print(resolvedHost.toString());
-        syslog->print(":443 rc=");
-        syslog->print(tcpRc);
-        syslog->print(" (");
-        syslog->print(tcpElapsedMs);
-        syslog->println("ms)");
+        syslog->infoNolf(DEBUG_NET, "Contribute TCP probe ");
+        syslog->infoNolf(DEBUG_NET, resolvedHost.toString());
+        syslog->infoNolf(DEBUG_NET, ":443 rc=");
+        syslog->infoNolf(DEBUG_NET, tcpRc);
+        syslog->infoNolf(DEBUG_NET, " (");
+        syslog->infoNolf(DEBUG_NET, tcpElapsedMs);
+        syslog->info(DEBUG_NET, "ms)");
         tcpProbe.stop();
       }
       if (!tlsMemIssue)
       {
         if (kContributeRetryOnceOnFail)
         {
-          syslog->println("Retry contribute POST once...");
+          syslog->info(DEBUG_NET, "Retry contribute POST once...");
           delay(250);
           if (dnsRc == 1)
           {
@@ -5941,25 +5924,25 @@ bool Board320_240::netContributeData()
         }
         else
         {
-          syslog->println("Contribute HTTPS retry disabled (stability mode)");
+          syslog->info(DEBUG_NET, "Contribute HTTPS retry disabled (stability mode)");
         }
       }
       else
       {
-        syslog->println("Contribute HTTPS retry skipped (TLS memory issue on attempt 1)");
+        syslog->info(DEBUG_NET, "Contribute HTTPS retry skipped (TLS memory issue on attempt 1)");
       }
     }
 
     if (kContributeRawTlsFallbackOnTlsMem && rc < 0 && dnsRc == 1 && !usedRawTlsFirst)
     {
-      syslog->println("Contribute HTTPS fallback: raw TLS POST with SNI...");
+      syslog->info(DEBUG_NET, "Contribute HTTPS fallback: raw TLS POST with SNI...");
       rc = postContributePayloadRawTls(responsePayload, resolvedHost, 3);
       tlsMemIssue = isTlsMemoryIssue(lastTlsErrCode, lastTlsErrText);
     }
 
     if (kContributeHttpFallbackOnTlsMem && rc < 0 && tlsMemIssue)
     {
-      syslog->println("Contribute TLS memory workaround: plain HTTP fallback...");
+      syslog->info(DEBUG_NET, "Contribute TLS memory workaround: plain HTTP fallback...");
       rc = postContributePayloadHttp(responsePayload, 4);
       if (rc > 0)
       {
@@ -5969,13 +5952,16 @@ bool Board320_240::netContributeData()
 
     if (rc < 0 && tlsMemIssue)
     {
-      syslog->println("Contribute HTTPS TLS memory issue detected in low-memory mode.");
+      syslog->info(DEBUG_NET, "Contribute HTTPS TLS memory issue detected in low-memory mode.");
     }
 
     if (rc == HTTP_CODE_OK)
     {
       bool responseAccepted = true;
-      syslog->println("HTTP Response (" + String(contributeHost) + "): " + responsePayload);
+      syslog->infoNolf(DEBUG_NET, "HTTP Response (");
+      syslog->infoNolf(DEBUG_NET, contributeHost);
+      syslog->infoNolf(DEBUG_NET, "): ");
+      syslog->info(DEBUG_NET, responsePayload);
 
       StaticJsonDocument<256> doc;
       DeserializationError error = deserializeJson(doc, responsePayload);
@@ -5985,16 +5971,16 @@ bool Board320_240::netContributeData()
         if (status != nullptr && strcmp(status, "ok") != 0)
         {
           responseAccepted = false;
-          syslog->print("Contribute rejected by server: ");
-          syslog->println(status);
+          syslog->infoNolf(DEBUG_NET, "Contribute rejected by server: ");
+          syslog->info(DEBUG_NET, status);
         }
 
         const char *token = doc["token"];
         if (token != nullptr && strlen(token) > 10 &&
             strcmp(liveData->settings.contributeToken, token) != 0)
         {
-          syslog->print("Assigned token: ");
-          syslog->println(token);
+          syslog->infoNolf(DEBUG_NET, "Assigned token: ");
+          syslog->info(DEBUG_NET, token);
           strncpy(liveData->settings.contributeToken, token, sizeof(liveData->settings.contributeToken) - 1);
           liveData->settings.contributeToken[sizeof(liveData->settings.contributeToken) - 1] = '\0';
           saveSettings();
@@ -6003,8 +5989,8 @@ bool Board320_240::netContributeData()
       else
       {
         // Keep upload as successful even when payload is non-JSON due proxy/WAF text.
-        syslog->print("Contribute response parse error: ");
-        syslog->println(error.c_str());
+        syslog->infoNolf(DEBUG_NET, "Contribute response parse error: ");
+        syslog->info(DEBUG_NET, error.c_str());
       }
 
       if (responseAccepted)
@@ -6024,9 +6010,9 @@ bool Board320_240::netContributeData()
       // Failed...
       if (rc > 0)
       {
-        syslog->print("HTTP POST status: ");
-        syslog->println(rc);
-        if (responsePayload.length() > 0)
+        syslog->infoNolf(DEBUG_NET, "HTTP POST status: ");
+        syslog->info(DEBUG_NET, rc);
+        if (responsePayload.length() > 0 && syslog->isDebug(DEBUG_NET))
         {
           String responsePreview = responsePayload;
           responsePreview.replace('\r', ' ');
@@ -6035,21 +6021,27 @@ bool Board320_240::netContributeData()
           {
             responsePreview = responsePreview.substring(0, 180) + "...";
           }
-          syslog->println("HTTP Response preview (" + String(contributeHost) + "): " + responsePreview);
+          syslog->infoNolf(DEBUG_NET, "HTTP Response preview (");
+          syslog->infoNolf(DEBUG_NET, contributeHost);
+          syslog->infoNolf(DEBUG_NET, "): ");
+          syslog->info(DEBUG_NET, responsePreview);
         }
       }
       else
       {
-        syslog->print("HTTP POST error: ");
-        syslog->println(rc);
-        syslog->print("HTTP POST error text: ");
-        syslog->println(HTTPClient::errorToString(rc).c_str());
+        syslog->infoNolf(DEBUG_NET, "HTTP POST error: ");
+        syslog->info(DEBUG_NET, rc);
+        syslog->infoNolf(DEBUG_NET, "HTTP POST error text: ");
+        syslog->info(DEBUG_NET, HTTPClient::errorToString(rc).c_str());
       }
-      syslog->print("WiFi status/IP/GW/DNS: ");
-      syslog->println(String(WiFi.status()) + " / " +
-                      WiFi.localIP().toString() + " / " +
-                      WiFi.gatewayIP().toString() + " / " +
-                      WiFi.dnsIP(0).toString());
+      if (syslog->isDebug(DEBUG_NET))
+      {
+        syslog->infoNolf(DEBUG_NET, "WiFi status/IP/GW/DNS: ");
+        syslog->info(DEBUG_NET, String(WiFi.status()) + " / " +
+                        WiFi.localIP().toString() + " / " +
+                        WiFi.gatewayIP().toString() + " / " +
+                        WiFi.dnsIP(0).toString());
+      }
       scheduleNextContributeCycle();
       updateNetAvailability(false);
     }
@@ -6277,7 +6269,7 @@ bool Board320_240::postSdLogChunkToEvDash(const String &fileName, uint32_t part,
   {
     return false;
   }
-  const bool debugLog = (responseCode != nullptr && liveData->settings.debugLevel >= DEBUG_SDCARD);
+  const bool debugLog = (responseCode != nullptr && ((liveData->settings.debugLevel & DEBUG_SDCARD) != 0));
 
   if (WiFi.status() != WL_CONNECTED)
   {

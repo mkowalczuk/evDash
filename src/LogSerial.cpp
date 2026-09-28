@@ -83,59 +83,86 @@ void LogSerial::setMirrorCallback(LogSerialMirrorCallback callback, void *contex
 }
 
 /**
- * Write one byte to console and mirror/log it when enabled.
+ * Write raw chunk to hardware console, mirror callback, and SD log.
  */
-size_t LogSerial::write(uint8_t data)
+void LogSerial::writeDirect(const uint8_t *buf, size_t len)
 {
+  if (buf == nullptr || len == 0)
+  {
+    return;
+  }
 #ifdef BOARD_M5STACK_CORES3
-  size_t written = HWCDC::write(data);
+  HWCDC::write(buf, len);
 #else
-  size_t written = HardwareSerial::write(data);
+  HardwareSerial::write(buf, len);
 #endif // BOARD_M5STACK_CORES3
   if (mirrorCallback != nullptr)
   {
-    mirrorCallback(&data, 1, mirrorContext);
+    mirrorCallback(buf, len, mirrorContext);
   }
   if (logToSdcard && sdLogFile)
   {
-    size_t sdWritten = sdLogFile.write(data);
+    size_t sdWritten = sdLogFile.write(buf, len);
     if (sdWritten == 0)
     {
       stopSdLogging();
     }
-    else if (data == '\n')
+    else if (memchr(buf, '\n', len) != nullptr)
     {
       sdLogFile.flush();
     }
   }
-  return written;
 }
 
 /**
- * Write bytes to console and mirror/log them when enabled.
+ * Write one byte to console, normalizing lone LF to CRLF for consistent console/SD logs.
+ */
+size_t LogSerial::write(uint8_t data)
+{
+  if (data == '\n' && lastChar != '\r')
+  {
+    const uint8_t cr = '\r';
+    writeDirect(&cr, 1);
+  }
+  writeDirect(&data, 1);
+  lastChar = data;
+  return 1;
+}
+
+/**
+ * Write bytes to console, normalizing any lone LF to CRLF for consistent console/SD logs.
  */
 size_t LogSerial::write(const uint8_t *buffer, size_t size)
 {
-#ifdef BOARD_M5STACK_CORES3
-  size_t written = HWCDC::write(buffer, size);
-#else
-  size_t written = HardwareSerial::write(buffer, size);
-#endif // BOARD_M5STACK_CORES3
-  if (mirrorCallback != nullptr && buffer != nullptr && size > 0)
+  if (buffer == nullptr || size == 0)
   {
-    mirrorCallback(buffer, size, mirrorContext);
+    return 0;
   }
-  if (logToSdcard && sdLogFile && buffer != nullptr && size > 0)
+
+  size_t start = 0;
+  for (size_t i = 0; i < size; i++)
   {
-    size_t sdWritten = sdLogFile.write(buffer, size);
-    if (sdWritten == 0)
+    if (buffer[i] == '\n')
     {
-      stopSdLogging();
-    }
-    else if (memchr(buffer, '\n', size) != nullptr)
-    {
-      sdLogFile.flush();
+      const bool needsCr = (i == 0) ? (lastChar != '\r') : (buffer[i - 1] != '\r');
+      if (needsCr)
+      {
+        if (i > start)
+        {
+          writeDirect(buffer + start, i - start);
+        }
+        const uint8_t cr = '\r';
+        writeDirect(&cr, 1);
+        start = i;
+      }
     }
   }
-  return written;
+
+  if (start < size)
+  {
+    writeDirect(buffer + start, size - start);
+  }
+
+  lastChar = buffer[size - 1];
+  return size;
 }

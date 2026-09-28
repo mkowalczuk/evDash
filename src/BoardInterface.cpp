@@ -738,6 +738,17 @@ bool BoardInterface::customConsoleCommand(String cmd)
     syslog->println((liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "PUBLIC (fallback RANDOM)" : "RANDOM (fallback PUBLIC)");
     return true;
   }
+  if (cmd.equalsIgnoreCase("debugLevel"))
+  {
+    syslog->printf("Debug level bitmask: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
+                   liveData->settings.debugLevel,
+                   (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
+    return true;
+  }
   // CAN comparer
   if (cmd.equalsIgnoreCase("compare"))
   {
@@ -898,17 +909,82 @@ bool BoardInterface::customConsoleCommand(String cmd)
   }
 
   //
-  if (key.equalsIgnoreCase("abrpDebug"))
-  {
-    liveData->params.abrpDebug = (value.toInt() != 0);
-    syslog->print("ABRP debug logging: ");
-    syslog->println(liveData->params.abrpDebug ? "enabled" : "disabled");
-    return true;
-  }
   if (key.equalsIgnoreCase("debugLevel"))
   {
-    liveData->settings.debugLevel = value.toInt();
+    if (value.equalsIgnoreCase("all") || value == "255")
+    {
+      liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
+    }
+    else if (value.equalsIgnoreCase("none") || value.equalsIgnoreCase("off") || value == "0")
+    {
+      liveData->settings.debugLevel = DEBUG_NONE;
+    }
+    else if (value.indexOf(',') != -1 || value.startsWith("+") || value.startsWith("-"))
+    {
+      int start = 0;
+      while (start < value.length())
+      {
+        int comma = value.indexOf(',', start);
+        String token = (comma == -1) ? value.substring(start) : value.substring(start, comma);
+        token.trim();
+        bool remove = token.startsWith("-");
+        if (token.startsWith("+") || token.startsWith("-"))
+          token = token.substring(1);
+        uint8_t bit = 0;
+        if (token.equalsIgnoreCase("comm"))
+          bit = DEBUG_COMM;
+        else if (token.equalsIgnoreCase("net") || token.equalsIgnoreCase("gsm"))
+          bit = DEBUG_NET;
+        else if (token.equalsIgnoreCase("sd") || token.equalsIgnoreCase("sdcard"))
+          bit = DEBUG_SDCARD;
+        else if (token.equalsIgnoreCase("gps"))
+          bit = DEBUG_GPS;
+        else if (token.equalsIgnoreCase("abrp"))
+          bit = DEBUG_ABRP;
+        else if (token.equalsIgnoreCase("all"))
+          bit = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
+        if (remove)
+          liveData->settings.debugLevel &= ~bit;
+        else
+          liveData->settings.debugLevel |= bit;
+        if (comma == -1)
+          break;
+        start = comma + 1;
+      }
+    }
+    else if (value.equalsIgnoreCase("comm"))
+    {
+      liveData->settings.debugLevel = DEBUG_COMM;
+    }
+    else if (value.equalsIgnoreCase("net") || value.equalsIgnoreCase("gsm"))
+    {
+      liveData->settings.debugLevel = DEBUG_NET;
+    }
+    else if (value.equalsIgnoreCase("sd") || value.equalsIgnoreCase("sdcard"))
+    {
+      liveData->settings.debugLevel = DEBUG_SDCARD;
+    }
+    else if (value.equalsIgnoreCase("gps"))
+    {
+      liveData->settings.debugLevel = DEBUG_GPS;
+    }
+    else if (value.equalsIgnoreCase("abrp"))
+    {
+      liveData->settings.debugLevel = DEBUG_ABRP;
+    }
+    else
+    {
+      liveData->settings.debugLevel = value.toInt();
+    }
     syslog->setDebugLevel(liveData->settings.debugLevel);
+    saveSettings();
+    syslog->printf("Debug level set to: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
+                   liveData->settings.debugLevel,
+                   (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
     return true;
   }
   if (key.equalsIgnoreCase("setTime"))
@@ -1144,8 +1220,8 @@ void BoardInterface::showHelp()
   syslog->println("factoryReset   ... reset settings to defaults");
   syslog->println("ipconfig       ... print network settings");
   syslog->println("ABRP_debug     ... print ABRP user token");
-  syslog->println("abrpDebug=n    [n = 0..1]  ... enable/disable verbose ABRP debug logging");
-  syslog->println("debugLevel=n   [n = 0..4]  ... set debug level all, gps, comm, ...");
+  syslog->println("debugLevel     ... print current debug level bitmask");
+  syslog->println("debugLevel=n   ... set debug level bitmask: 0=none, 1=comm, 2=net, 4=sd, 8=gps, 16=abrp (e.g. 9=comm+gps, all, none)");
   syslog->println("wifiSsid=x     ... set primary AP ssid");
   syslog->println("wifiPassword=x ... set primary AP password");
   syslog->println("wifiSsid2=x    ... set 2nd AP ssid (replace primary wifi automatically in 1-2 minutes)");

@@ -29,7 +29,6 @@ void LiveData::initParams()
   params.stopCommandQueue = false;
   // Network
   params.ntpTimeSet = false;
-  params.abrpDebug = false;
   params.wifiActiveIndex = 0;
   params.lastRemoteApiSent = 0;
   params.lastAbrpSent = 0;

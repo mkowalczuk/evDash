@@ -330,26 +330,40 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     suffix = (liveData->settings.voltmeterEnabled == 0) ? "[off]" : "[on]";
     break;
   case MENU_DEBUG_LEVEL:
-    switch (liveData->settings.debugLevel)
+    if (liveData->settings.debugLevel == DEBUG_NONE)
     {
-    case DEBUG_NONE:
-      suffix = "[all]";
-      break;
-    case DEBUG_COMM:
-      suffix = "[comm]";
-      break;
-    case DEBUG_GSM:
-      suffix = "[net]";
-      break;
-    case DEBUG_SDCARD:
-      suffix = "[sdcard]";
-      break;
-    case DEBUG_GPS:
-      suffix = "[gps]";
-      break;
-    default:
-      suffix = "[unknown]";
+      suffix = "[none]";
     }
+    else if ((liveData->settings.debugLevel & (DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP)) == (DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP))
+    {
+      suffix = "[all]";
+    }
+    else
+    {
+      sprintf(tmpStr1, "[%u]", liveData->settings.debugLevel);
+      suffix = tmpStr1;
+    }
+    break;
+  case MENU_DEBUG_LEVEL_COMM:
+    suffix = (liveData->settings.debugLevel & DEBUG_COMM) ? "[on]" : "[off]";
+    break;
+  case MENU_DEBUG_LEVEL_NET:
+    suffix = (liveData->settings.debugLevel & DEBUG_NET) ? "[on]" : "[off]";
+    break;
+  case MENU_DEBUG_LEVEL_SDCARD:
+    suffix = (liveData->settings.debugLevel & DEBUG_SDCARD) ? "[on]" : "[off]";
+    break;
+  case MENU_DEBUG_LEVEL_GPS:
+    suffix = (liveData->settings.debugLevel & DEBUG_GPS) ? "[on]" : "[off]";
+    break;
+  case MENU_DEBUG_LEVEL_ABRP:
+    suffix = (liveData->settings.debugLevel & DEBUG_ABRP) ? "[on]" : "[off]";
+    break;
+  case MENU_DEBUG_LEVEL_ALL:
+    suffix = "[all]";
+    break;
+  case MENU_DEBUG_LEVEL_NONE:
+    suffix = "[none]";
     break;
   case MENU_SCREEN_ROTATION:
     suffix = (liveData->settings.displayRotation == 1) ? "[vertical]" : "[normal]";
@@ -1551,9 +1565,52 @@ void Board320_240::menuItemClick()
       showMenu();
       return;
       break;
-    case MENU_DEBUG_LEVEL:
-      liveData->settings.debugLevel = (liveData->settings.debugLevel == DEBUG_GPS) ? 0 : liveData->settings.debugLevel + 1;
+    case MENU_DEBUG_LEVEL_COMM:
+      liveData->settings.debugLevel ^= DEBUG_COMM;
       syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      showMenu();
+      return;
+      break;
+    case MENU_DEBUG_LEVEL_NET:
+      liveData->settings.debugLevel ^= DEBUG_NET;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      showMenu();
+      return;
+      break;
+    case MENU_DEBUG_LEVEL_SDCARD:
+      liveData->settings.debugLevel ^= DEBUG_SDCARD;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      showMenu();
+      return;
+      break;
+    case MENU_DEBUG_LEVEL_GPS:
+      liveData->settings.debugLevel ^= DEBUG_GPS;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      showMenu();
+      return;
+      break;
+    case MENU_DEBUG_LEVEL_ABRP:
+      liveData->settings.debugLevel ^= DEBUG_ABRP;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      showMenu();
+      return;
+      break;
+    case MENU_DEBUG_LEVEL_ALL:
+      liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      showMenu();
+      return;
+      break;
+    case MENU_DEBUG_LEVEL_NONE:
+      liveData->settings.debugLevel = DEBUG_NONE;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
       showMenu();
       return;
       break;
