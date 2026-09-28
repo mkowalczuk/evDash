@@ -24,18 +24,52 @@ void LogSerial::setDebugLevel(uint8_t aDebugLevel)
 }
 
 /**
- * Write log to sdcard
+ * Start dumping console log to an SD card file
+ */
+bool LogSerial::startSdLogging(const char *path)
+{
+  stopSdLogging();
+  if (path == nullptr || path[0] == '\0')
+  {
+    return false;
+  }
+  sdLogFile = SD.open(path, FILE_APPEND);
+  if (!sdLogFile)
+  {
+    sdLogFile = SD.open(path, FILE_WRITE);
+  }
+  if (!sdLogFile)
+  {
+    return false;
+  }
+  strncpy(currentSdLogPath, path, sizeof(currentSdLogPath) - 1);
+  currentSdLogPath[sizeof(currentSdLogPath) - 1] = '\0';
+  logToSdcard = true;
+  return true;
+}
+
+/**
+ * Stop dumping console log to SD card and close file
+ */
+void LogSerial::stopSdLogging()
+{
+  if (logToSdcard && sdLogFile)
+  {
+    sdLogFile.flush();
+    sdLogFile.close();
+  }
+  logToSdcard = false;
+  currentSdLogPath[0] = '\0';
+}
+
+/**
+ * Write log to sdcard (legacy compatibility)
  */
 void LogSerial::setLogToSdcard(bool state)
 {
-  logToSdcard = state;
-
-  if (logToSdcard)
+  if (!state)
   {
-    // code under construction
-    file = SD.open("/console_output", FILE_WRITE);
-    file.println("========================");
-    file.close();
+    stopSdLogging();
   }
 }
 
@@ -49,7 +83,7 @@ void LogSerial::setMirrorCallback(LogSerialMirrorCallback callback, void *contex
 }
 
 /**
- * Write one byte to console and mirror it when enabled.
+ * Write one byte to console and mirror/log it when enabled.
  */
 size_t LogSerial::write(uint8_t data)
 {
@@ -62,11 +96,23 @@ size_t LogSerial::write(uint8_t data)
   {
     mirrorCallback(&data, 1, mirrorContext);
   }
+  if (logToSdcard && sdLogFile)
+  {
+    size_t sdWritten = sdLogFile.write(data);
+    if (sdWritten == 0)
+    {
+      stopSdLogging();
+    }
+    else if (data == '\n')
+    {
+      sdLogFile.flush();
+    }
+  }
   return written;
 }
 
 /**
- * Write bytes to console and mirror them when enabled.
+ * Write bytes to console and mirror/log them when enabled.
  */
 size_t LogSerial::write(const uint8_t *buffer, size_t size)
 {
@@ -78,6 +124,18 @@ size_t LogSerial::write(const uint8_t *buffer, size_t size)
   if (mirrorCallback != nullptr && buffer != nullptr && size > 0)
   {
     mirrorCallback(buffer, size, mirrorContext);
+  }
+  if (logToSdcard && sdLogFile && buffer != nullptr && size > 0)
+  {
+    size_t sdWritten = sdLogFile.write(buffer, size);
+    if (sdWritten == 0)
+    {
+      stopSdLogging();
+    }
+    else if (memchr(buffer, '\n', size) != nullptr)
+    {
+      sdLogFile.flush();
+    }
   }
   return written;
 }

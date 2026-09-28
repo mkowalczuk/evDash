@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 26
+#define SETTINGS_VERSION_CURRENT 28
 
 //
 #define MONTH_SEC 2678400
@@ -457,6 +457,10 @@ typedef struct
   uint8_t relayForMobileEnabled; // 0 - off, 1 - BLE relay for iOS/Android app
   char relayToken[32];           // Shared token for paired mobile app
   char relayMobileId[40];        // Last paired mobile app id
+  // == settings version 27
+  uint8_t sdcardConsoleLogEnabled; // 0 - off, 1 - dump console logs to /logs/YYYY-MM-DD_HH_mm_ss.log
+  // == settings version 28
+  char webLogServerPassword[16];   // AP password for on-demand web server (8 alphanumeric chars)
   //
 } SETTINGS_STRUC;
 
