@@ -13,12 +13,15 @@
 
 typedef void (*LogSerialMirrorCallback)(const uint8_t *data, size_t size, void *context);
 
-// DEBUG LEVEL
-#define DEBUG_NONE 0
-#define DEBUG_COMM 1   // filter comm
-#define DEBUG_GSM 2    // filter gsm messages
-#define DEBUG_SDCARD 3 // filter sdcard
-#define DEBUG_GPS 4    // filter gps
+// DEBUG LEVEL (bitmask)
+#define DEBUG_NONE 0          // 0 - no debug messages (quiet)
+#define DEBUG_COMM (1 << 0)   // 1 - comm (BLE/CAN)
+#define DEBUG_NET (1 << 1)    // 2 - network (wifi / gsm / cloud services)
+#define DEBUG_GSM DEBUG_NET   // backwards compatibility alias
+#define DEBUG_SDCARD (1 << 2) // 4 - sdcard
+#define DEBUG_GPS (1 << 3)    // 8 - gps
+#define DEBUG_ABRP (1 << 4)   // 16 - abrp telemetry
+#define DEBUG_ALL 0xFF        // 255 - all debug messages
 
 #ifdef BOARD_M5STACK_CORES3
 class LogSerial : public HWCDC
@@ -28,6 +31,7 @@ class LogSerial : public HardwareSerial
 {
 protected:
   uint8_t debugLevel;
+  uint8_t lastChar = 0;
   bool logToSdcard = false;
   LogSerialMirrorCallback mirrorCallback = nullptr;
   void *mirrorContext = nullptr;
@@ -42,8 +46,8 @@ protected:
   uint32_t lastSdWriteMs = 0;
   uint32_t lastSdFlushMs = 0;
   portMUX_TYPE sdBufMux = portMUX_INITIALIZER_UNLOCKED;
-
   void pushSdBuffer(const uint8_t *buf, size_t len);
+  void writeDirect(const uint8_t *buf, size_t len);
 public:
 #ifndef BOARD_M5STACK_CORES3
   LogSerial();
@@ -51,6 +55,8 @@ public:
 
   //
   void setDebugLevel(uint8_t aDebugLevel);
+  uint8_t getDebugLevel() const { return debugLevel; }
+  bool isDebug(uint8_t aDebugLevel) const { return (debugLevel & aDebugLevel) != 0; }
   void setLogToSdcard(bool state);
   bool startSdLogging(const char *path);
   void stopSdLogging();
@@ -74,14 +80,14 @@ public:
   template <class T, typename... Args>
   void info(uint8_t aDebugLevel, T msg)
   {
-    if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
+    if (aDebugLevel != DEBUG_NONE && (debugLevel & aDebugLevel) == 0)
       return;
     println(msg);
   }
   template <class T, typename... Args>
   void infoNolf(uint8_t aDebugLevel, T msg)
   {
-    if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
+    if (aDebugLevel != DEBUG_NONE && (debugLevel & aDebugLevel) == 0)
       return;
     print(msg);
   }
@@ -89,7 +95,7 @@ public:
   template <class T, typename... Args>
   void warn(uint8_t aDebugLevel, T msg)
   {
-    if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
+    if (aDebugLevel != DEBUG_NONE && (debugLevel & aDebugLevel) == 0)
       return;
     print("WARN ");
     println(msg);
@@ -97,7 +103,7 @@ public:
   template <class T, typename... Args>
   void warnNolf(uint8_t aDebugLevel, T msg)
   {
-    if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
+    if (aDebugLevel != DEBUG_NONE && (debugLevel & aDebugLevel) == 0)
       return;
     print("WARN ");
     print(msg);
@@ -107,7 +113,7 @@ public:
   template <class T, typename... Args>
   void err(uint8_t aDebugLevel, T msg)
   {
-    if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
+    if (aDebugLevel != DEBUG_NONE && (debugLevel & aDebugLevel) == 0)
       return;
     print("ERR ");
     println(msg);
@@ -115,7 +121,7 @@ public:
   template <class T, typename... Args>
   void errNolf(uint8_t aDebugLevel, T msg)
   {
-    if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
+    if (aDebugLevel != DEBUG_NONE && (debugLevel & aDebugLevel) == 0)
       return;
     print("ERR ");
     print(msg);

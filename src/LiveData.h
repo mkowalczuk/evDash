@@ -162,7 +162,6 @@ typedef struct
   time_t wifiLastConnectedTime;
   time_t wifiBackupUptime;
   bool wifiApMode; // hotspot
-  bool abrpDebug;  // ABRP verbose debug logging (abrpDebug=0/1 in console)
   // GPS
   bool currTimeSyncWithGps;
   bool gpsValid;
@@ -377,7 +376,7 @@ typedef struct
   // === settings version 6
   // =================================
   uint8_t serialConsolePort;     // 255-off, 0 - hw serial (std)
-  uint8_t debugLevel;            // 0 - info only, 1 - debug communication (BLE/CAN), 2 - debug GSM, 3 - debug SDcard, 4 - GPS
+  uint8_t debugLevel;            // bitmask: 0 - none, 1 - comm (BLE/CAN), 2 - GSM/net, 4 - SDcard, 8 - GPS, 255 - all
   uint16_t sdcardLogIntervalSec; // every x seconds
   uint16_t gprsLogIntervalSec;   // every x seconds
   // === settings version 7

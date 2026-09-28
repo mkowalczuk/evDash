@@ -3,9 +3,8 @@ reboot				        reboot device
 shutdown			    	    shutdown device
 saveSettings			    save current settings
 ipconfig			        print network settings
-debugLevel=n   [n = 0..3]	set debug level all, gps, comm, ...
+debugLevel=n   [n = 0..255]	set debug level bitmask (1=comm, 2=net, 4=sdcard, 8=gps, 16=abrp, 255=all, 0=none)
 ABRP_debug				print ABRP user token
-abrpDebug=n    [n = 0..1]	enable/disable verbose ABRP debug logging (default 0)
 wifiSsid=x			        set primary AP ssid
 wifiPassword=x			    set primary AP password
 wifiSsid2=x			        set 2nd AP ssid (replace primary wifi automatically in 1-2 minutes)
