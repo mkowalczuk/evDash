@@ -108,6 +108,44 @@ void BoardInterface::resetSettings()
 }
 
 /**
+ * Generate random alphanumeric string
+ */
+void BoardInterface::generateRandomAlphanumeric(char *buf, size_t count)
+{
+  static const char charset[] = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const size_t charsetSize = sizeof(charset) - 1;
+  for (size_t i = 0; i < count; i++)
+  {
+    buf[i] = charset[esp_random() % charsetSize];
+  }
+  buf[count] = '\0';
+}
+
+/**
+ * Validate that password contains only printable alphanumeric characters of minimum length
+ */
+bool BoardInterface::isValidPassword(const char *pwd, size_t minLen)
+{
+  if (pwd == nullptr)
+  {
+    return false;
+  }
+  size_t len = strlen(pwd);
+  if (len < minLen)
+  {
+    return false;
+  }
+  for (size_t i = 0; i < len; i++)
+  {
+    if (!isalnum((unsigned char)pwd[i]))
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Load setting from flash memory, upgrade structure if version differs
  */
 void BoardInterface::loadSettings()
@@ -145,6 +183,7 @@ void BoardInterface::loadSettings()
   liveData->settings.ntpDaySaveTime = 0;
   liveData->settings.sdcardEnabled = 0;
   liveData->settings.sdcardAutstartLog = 1;
+  liveData->settings.sdcardConsoleLogEnabled = 0;
   tmpStr = "not_set";
   tmpStr.toCharArray(liveData->settings.gprsApn, tmpStr.length() + 1);
   // Remote upload
@@ -240,7 +279,6 @@ void BoardInterface::loadSettings()
   liveData->settings.relayToken[0] = '\0';
   liveData->settings.relayMobileId[0] = '\0';
   // v26
-  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
   tmpStr = "empty";
   tmpStr.toCharArray(liveData->settings.wifiSsid3, tmpStr.length() + 1);
   tmpStr = "not_set";
@@ -249,6 +287,12 @@ void BoardInterface::loadSettings()
   tmpStr.toCharArray(liveData->settings.wifiSsid4, tmpStr.length() + 1);
   tmpStr = "not_set";
   tmpStr.toCharArray(liveData->settings.wifiPassword4, tmpStr.length() + 1);
+  // v27
+  liveData->settings.sdcardConsoleLogEnabled = 0;
+  // v28
+  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
+  generateRandomAlphanumeric(liveData->settings.webLogServerPassword, 8);
+  liveData->settings.sdcardLogRetention = 20;
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -451,7 +495,7 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 25)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 26;
         tmpStr = "empty";
         tmpStr.toCharArray(liveData->tmpSettings.wifiSsid3, tmpStr.length() + 1);
         tmpStr = "not_set";
@@ -460,6 +504,17 @@ void BoardInterface::loadSettings()
         tmpStr.toCharArray(liveData->tmpSettings.wifiSsid4, tmpStr.length() + 1);
         tmpStr = "not_set";
         tmpStr.toCharArray(liveData->tmpSettings.wifiPassword4, tmpStr.length() + 1);
+      }
+      if (liveData->tmpSettings.settingsVersion == 26)
+      {
+        liveData->tmpSettings.settingsVersion = 27;
+        liveData->tmpSettings.sdcardConsoleLogEnabled = 0;
+      }
+      if (liveData->tmpSettings.settingsVersion == 27)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        generateRandomAlphanumeric(liveData->tmpSettings.webLogServerPassword, 8);
+        liveData->tmpSettings.sdcardLogRetention = 20;
       }
 
       // Save upgraded structure
@@ -502,7 +557,26 @@ void BoardInterface::loadSettings()
   EVDASH_TERMINATE_FIELD(traccarServerHost);
   EVDASH_TERMINATE_FIELD(relayToken);
   EVDASH_TERMINATE_FIELD(relayMobileId);
+  EVDASH_TERMINATE_FIELD(webLogServerPassword);
 #undef EVDASH_TERMINATE_FIELD
+
+  if (!isValidPassword(liveData->settings.webLogServerPassword, 8))
+  {
+    generateRandomAlphanumeric(liveData->settings.webLogServerPassword, 8);
+    saveSettings();
+  }
+
+  if (liveData->settings.sdcardLogRetention != 0 &&
+      liveData->settings.sdcardLogRetention != 1 &&
+      liveData->settings.sdcardLogRetention != 5 &&
+      liveData->settings.sdcardLogRetention != 10 &&
+      liveData->settings.sdcardLogRetention != 20 &&
+      liveData->settings.sdcardLogRetention != 50 &&
+      liveData->settings.sdcardLogRetention != 100)
+  {
+    liveData->settings.sdcardLogRetention = 20;
+    saveSettings();
+  }
 
   if (liveData->settings.contributeJsonType != CONTRIBUTE_JSON_TYPE_V2)
   {
@@ -659,6 +733,34 @@ bool BoardInterface::customConsoleCommand(String cmd)
     enterSleepMode(0);
     return true;
   }
+  if (cmd.equalsIgnoreCase("apPassword"))
+  {
+    syslog->print("AP password: ");
+    syslog->println(liveData->settings.webLogServerPassword);
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("sdLogs") || cmd.equalsIgnoreCase("sdLogRetention") ||
+      cmd.equalsIgnoreCase("sdcardLogs") || cmd.equalsIgnoreCase("sdcardLogRetention") ||
+      cmd.equalsIgnoreCase("preserveLogs"))
+  {
+    syslog->print("SD log retention: ");
+    if (liveData->settings.sdcardLogRetention == 0)
+    {
+      syslog->println("unlimited");
+    }
+    else
+    {
+      syslog->printf("%u logs\n", liveData->settings.sdcardLogRetention);
+    }
+    if (syslog != nullptr && syslog->isSdLogging())
+    {
+      syslog->printf("SD log buffer:    %u / %u bytes (dropped: %u)\n",
+                     (unsigned int)syslog->getSdBufferUsed(),
+                     (unsigned int)syslog->getSdBufferTotal(),
+                     (unsigned int)syslog->getSdBufferDropped());
+    }
+    return true;
+  }
   // CAN comparer
   if (cmd.equalsIgnoreCase("compare"))
   {
@@ -740,6 +842,73 @@ bool BoardInterface::customConsoleCommand(String cmd)
   if (key.equalsIgnoreCase("wifiPassword4"))
   {
     value.toCharArray(liveData->settings.wifiPassword4, sizeof(liveData->settings.wifiPassword4));
+    return true;
+  }
+  if (key.equalsIgnoreCase("apPassword"))
+  {
+    if (value.length() < 8)
+    {
+      syslog->println("Error: AP password must be at least 8 characters");
+      return true;
+    }
+    if (!isValidPassword(value.c_str(), 8))
+    {
+      syslog->println("Error: AP password must contain only alphanumeric characters");
+      return true;
+    }
+    value.toCharArray(liveData->settings.webLogServerPassword, sizeof(liveData->settings.webLogServerPassword));
+    syslog->print("AP password set to: ");
+    syslog->println(liveData->settings.webLogServerPassword);
+    saveSettings();
+    return true;
+  }
+  if (key.equalsIgnoreCase("sdLogs") || key.equalsIgnoreCase("sdLogRetention") ||
+      key.equalsIgnoreCase("sdcardLogs") || key.equalsIgnoreCase("sdcardLogRetention") ||
+      key.equalsIgnoreCase("preserveLogs"))
+  {
+    if (value.equalsIgnoreCase("unlimited") || value == "0")
+    {
+      liveData->settings.sdcardLogRetention = 0;
+    }
+    else if (value == "1")
+    {
+      liveData->settings.sdcardLogRetention = 1;
+    }
+    else if (value == "5")
+    {
+      liveData->settings.sdcardLogRetention = 5;
+    }
+    else if (value == "10")
+    {
+      liveData->settings.sdcardLogRetention = 10;
+    }
+    else if (value == "20")
+    {
+      liveData->settings.sdcardLogRetention = 20;
+    }
+    else if (value == "50")
+    {
+      liveData->settings.sdcardLogRetention = 50;
+    }
+    else if (value == "100")
+    {
+      liveData->settings.sdcardLogRetention = 100;
+    }
+    else
+    {
+      syslog->println("Error: invalid value. Allowed: 1, 5, 10, 20, 50, 100, unlimited");
+      return true;
+    }
+    syslog->print("SD log retention set to: ");
+    if (liveData->settings.sdcardLogRetention == 0)
+    {
+      syslog->println("unlimited");
+    }
+    else
+    {
+      syslog->printf("%u logs\n", liveData->settings.sdcardLogRetention);
+    }
+    saveSettings();
     return true;
   }
   if (key.equalsIgnoreCase("remoteApiUrl"))
@@ -1042,6 +1211,10 @@ void BoardInterface::showHelp()
   syslog->println("wifiPassword3=x... set 3rd AP password");
   syslog->println("wifiSsid4=x    ... set 4th AP ssid");
   syslog->println("wifiPassword4=x... set 4th AP password");
+  syslog->println("apPassword     ... print current web log server AP password");
+  syslog->println("apPassword=x   ... set web log server AP password (min 8 alphanumeric chars)");
+  syslog->println("sdLogs         ... print SD log retention setting");
+  syslog->println("sdLogs=x       ... set SD log retention: 1, 5, 10, 20, 50, 100, unlimited");
   syslog->println("abrpApiToken=x ... set abrp api token for live data");
   syslog->println("remoteApiUrl=x ... set remote api url");
   syslog->println("remoteApiKey=x ... set remote api key");

@@ -7,6 +7,9 @@
 #endif // BOARD_M5STACK_CORES3
 #include <FS.h>
 #include <SD.h>
+#include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 
 typedef void (*LogSerialMirrorCallback)(const uint8_t *data, size_t size, void *context);
 
@@ -28,8 +31,19 @@ protected:
   bool logToSdcard = false;
   LogSerialMirrorCallback mirrorCallback = nullptr;
   void *mirrorContext = nullptr;
-  File file;
+  File sdLogFile;
+  char currentSdLogPath[64] = {0};
+  // SD console log ring buffer
+  uint8_t *sdBuffer = nullptr;
+  size_t sdBufferSize = 0;
+  volatile size_t sdBufferHead = 0;
+  volatile size_t sdBufferTail = 0;
+  volatile size_t sdBufferDropped = 0;
+  uint32_t lastSdWriteMs = 0;
+  uint32_t lastSdFlushMs = 0;
+  portMUX_TYPE sdBufMux = portMUX_INITIALIZER_UNLOCKED;
 
+  void pushSdBuffer(const uint8_t *buf, size_t len);
 public:
 #ifndef BOARD_M5STACK_CORES3
   LogSerial();
@@ -38,6 +52,14 @@ public:
   //
   void setDebugLevel(uint8_t aDebugLevel);
   void setLogToSdcard(bool state);
+  bool startSdLogging(const char *path);
+  void stopSdLogging();
+  bool isSdLogging() const { return logToSdcard; }
+  const char *getSdLogPath() const { return currentSdLogPath; }
+  size_t flushSdBuffer(size_t maxBytes = 1024, bool force = false);
+  size_t getSdBufferUsed() const;
+  size_t getSdBufferTotal() const { return sdBufferSize; }
+  size_t getSdBufferDropped() const { return sdBufferDropped; }
   void setMirrorCallback(LogSerialMirrorCallback callback, void *context);
 #ifdef BOARD_M5STACK_CORES3
   using HWCDC::write;
@@ -46,6 +68,7 @@ public:
 #endif // BOARD_M5STACK_CORES3
   size_t write(uint8_t data) override;
   size_t write(const uint8_t *buffer, size_t size) override;
+  void flush() override;
 
   // info
   template <class T, typename... Args>
@@ -54,12 +77,6 @@ public:
     if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
       return;
     println(msg);
-    if (logToSdcard)
-    {
-      file = SD.open("/console_output", FILE_APPEND);
-      file.println(msg);
-      file.close();
-    }
   }
   template <class T, typename... Args>
   void infoNolf(uint8_t aDebugLevel, T msg)
@@ -67,12 +84,6 @@ public:
     if (debugLevel != DEBUG_NONE && aDebugLevel != DEBUG_NONE && aDebugLevel != debugLevel)
       return;
     print(msg);
-    if (logToSdcard)
-    {
-      file = SD.open("/console_output", FILE_APPEND);
-      file.print(msg);
-      file.close();
-    }
   }
   // warning
   template <class T, typename... Args>
@@ -82,13 +93,6 @@ public:
       return;
     print("WARN ");
     println(msg);
-    if (logToSdcard)
-    {
-      file = SD.open("/console_output", FILE_APPEND);
-      file.print("WARN ");
-      file.println(msg);
-      file.close();
-    }
   }
   template <class T, typename... Args>
   void warnNolf(uint8_t aDebugLevel, T msg)
@@ -97,13 +101,6 @@ public:
       return;
     print("WARN ");
     print(msg);
-    if (logToSdcard)
-    {
-      file = SD.open("/console_output", FILE_APPEND);
-      file.print("WARN ");
-      file.print(msg);
-      file.close();
-    }
   }
 
   // error
@@ -114,11 +111,6 @@ public:
       return;
     print("ERR ");
     println(msg);
-    //
-    file = SD.open("/console_output", FILE_APPEND);
-    file.print("ERR ");
-    file.println(msg);
-    file.close();
   }
   template <class T, typename... Args>
   void errNolf(uint8_t aDebugLevel, T msg)
@@ -127,10 +119,5 @@ public:
       return;
     print("ERR ");
     print(msg);
-    //
-    file = SD.open("/console_output", FILE_APPEND);
-    file.print("ERR ");
-    file.print(msg);
-    file.close();
   }
 };

@@ -64,6 +64,8 @@ public:
   void resetSettings();
   void loadSettings();
   bool customConsoleCommand(String cmd);
+  static void generateRandomAlphanumeric(char *buf, size_t count);
+  static bool isValidPassword(const char *pwd, size_t minLen = 8);
   // Sdcard
   virtual bool sdcardMount() { return false; };
   virtual void sdcardToggleRecording() = 0;

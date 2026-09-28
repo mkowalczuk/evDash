@@ -1441,6 +1441,10 @@ void Board320_240::commLoop()
  */
 void Board320_240::boardLoop()
 {
+  if (syslog != nullptr && syslog->isSdLogging())
+  {
+    syslog->flushSdBuffer();
+  }
 }
 
 void Board320_240::recordContributeSample()
@@ -2178,6 +2182,11 @@ void Board320_240::mainLoop()
     }
   }
 
+  if (syslog != nullptr && syslog->isSdLogging())
+  {
+    syslog->flushSdBuffer();
+  }
+
   int64_t endTime5 = esp_timer_get_time();
 
   // Calculate duration
@@ -2707,6 +2716,11 @@ bool Board320_240::sdcardMount()
     uint64_t cardSize = SD.cardSize() / (1024 * 1024);
     syslog->printf("SD Card Size: %lluMB\n", cardSize);
 
+    if (liveData->settings.sdcardConsoleLogEnabled == 1 && !syslog->isSdLogging())
+    {
+      startSdcardConsoleLog();
+    }
+
     return true;
   }
 
@@ -2783,6 +2797,12 @@ void Board320_240::sdcardEraseLogs()
     sdcardToggleRecording();
   }
 
+  const bool wasConsoleLogging = syslog->isSdLogging();
+  if (wasConsoleLogging)
+  {
+    stopSdcardConsoleLog();
+  }
+
   File dir = SD.open("/");
   if (!dir || !dir.isDirectory())
   {
@@ -2826,15 +2846,271 @@ void Board320_240::sdcardEraseLogs()
   }
   dir.close();
 
+  // Also erase console logs in /logs
+  if (SD.exists("/logs"))
+  {
+    File logsDir = SD.open("/logs");
+    if (logsDir && logsDir.isDirectory())
+    {
+      while (true)
+      {
+        File entry = logsDir.openNextFile(FILE_READ);
+        if (!entry)
+        {
+          break;
+        }
+
+        const bool isDir = entry.isDirectory();
+        String fileName = String(entry.name());
+        entry.close();
+
+        if (isDir)
+        {
+          continue;
+        }
+
+        if (!fileName.endsWith(".log"))
+        {
+          continue;
+        }
+
+        String path = fileName;
+        if (!path.startsWith("/logs/"))
+        {
+          if (path.startsWith("/"))
+            path = "/logs" + path;
+          else
+            path = "/logs/" + path;
+        }
+
+        if (SD.remove(path.c_str()))
+        {
+          removed++;
+        }
+        else
+        {
+          failed++;
+        }
+      }
+      logsDir.close();
+    }
+  }
+
   sdcardRecordBuffer = "";
   String tmpStr = "";
   tmpStr.toCharArray(liveData->params.sdcardFilename, tmpStr.length() + 1);
   tmpStr.toCharArray(liveData->params.sdcardAbrpFilename, tmpStr.length() + 1);
 
+  if (wasConsoleLogging || liveData->settings.sdcardConsoleLogEnabled == 1)
+  {
+    startSdcardConsoleLog();
+  }
+
   String msg1 = "Logs erased: " + String(removed);
   String msg2 = (failed == 0) ? "Done" : "Failed: " + String(failed);
   displayMessage(msg1.c_str(), msg2.c_str());
   delay(2000);
+}
+
+/**
+ * Parse timestamp from log filename in format /logs/YYYY-MM-DD_HH_mm_ss.log
+ */
+static time_t parseSdLogFileTime(const char *name)
+{
+  const char *p = strrchr(name, '/');
+  if (p)
+    p++;
+  else
+    p = name;
+  int y = 0, m = 0, d = 0, H = 0, M = 0, S = 0;
+  if (sscanf(p, "%4d-%2d-%2d_%2d_%2d_%2d", &y, &m, &d, &H, &M, &S) == 6)
+  {
+    struct tm t;
+    memset(&t, 0, sizeof(t));
+    t.tm_year = y - 1900;
+    t.tm_mon = m - 1;
+    t.tm_mday = d;
+    t.tm_hour = H;
+    t.tm_min = M;
+    t.tm_sec = S;
+    return mktime(&t);
+  }
+  return 0;
+}
+
+/**
+ * Delete oldest console logs to preserve configured last X logs (sdcardLogRetention).
+ */
+void Board320_240::enforceSdLogSpaceLimit()
+{
+  if (!liveData->params.sdcardInit)
+  {
+    return;
+  }
+
+  const uint8_t maxLogs = liveData->settings.sdcardLogRetention;
+  if (maxLogs == 0)
+  {
+    return;
+  }
+
+  if (!SD.exists("/logs"))
+  {
+    SD.mkdir("/logs");
+    return;
+  }
+
+  const uint8_t maxAllowedExisting = (maxLogs > 1) ? (maxLogs - 1) : 0;
+  uint16_t safetyCounter = 500;
+  while (--safetyCounter > 0)
+  {
+    File dir = SD.open("/logs");
+    if (!dir || !dir.isDirectory())
+    {
+      if (dir)
+      {
+        dir.close();
+      }
+      break;
+    }
+
+    uint32_t totalLogsCount = 0;
+    String oldestLogPath = "";
+    time_t oldestLogTime = 0;
+    bool foundAnyLog = false;
+
+    while (true)
+    {
+      File entry = dir.openNextFile(FILE_READ);
+      if (!entry)
+      {
+        break;
+      }
+
+      if (!entry.isDirectory())
+      {
+        String name = String(entry.name());
+        if (name.endsWith(".log"))
+        {
+          String path = name;
+          if (!path.startsWith("/logs/"))
+          {
+            if (path.startsWith("/"))
+              path = "/logs" + path;
+            else
+              path = "/logs/" + path;
+          }
+
+          const char *activeLog = syslog->getSdLogPath();
+          if (activeLog == nullptr || path != activeLog)
+          {
+            totalLogsCount++;
+            time_t fileTime = parseSdLogFileTime(path.c_str());
+            if (fileTime == 0)
+            {
+              fileTime = entry.getLastWrite();
+            }
+
+            if (!foundAnyLog || fileTime < oldestLogTime || (fileTime == oldestLogTime && path < oldestLogPath))
+            {
+              foundAnyLog = true;
+              oldestLogTime = fileTime;
+              oldestLogPath = path;
+            }
+          }
+        }
+      }
+      entry.close();
+    }
+    dir.close();
+
+    if (!foundAnyLog || totalLogsCount <= maxAllowedExisting)
+    {
+      break;
+    }
+
+    syslog->printf("SD logs count (%u) exceeds limit (%u). Deleting oldest: %s\n",
+                   totalLogsCount, maxLogs, oldestLogPath.c_str());
+    if (!SD.remove(oldestLogPath.c_str()))
+    {
+      syslog->printf("Failed to remove oldest log: %s\n", oldestLogPath.c_str());
+      break;
+    }
+  }
+}
+
+/**
+ * Start console logging to SD card: /logs/YYYY-MM-DD_HH_mm_ss.log
+ */
+bool Board320_240::startSdcardConsoleLog()
+{
+  if (!liveData->params.sdcardInit && !sdcardMount())
+  {
+    syslog->println("SD card not mounted, cannot start console log");
+    return false;
+  }
+
+  if (syslog->isSdLogging())
+  {
+    return true;
+  }
+
+  if (!SD.exists("/logs"))
+  {
+    SD.mkdir("/logs");
+  }
+
+  enforceSdLogSpaceLimit();
+
+  char logPath[64];
+  struct tm nowTm;
+  if (!getLocalTime(&nowTm, 0))
+  {
+    memset(&nowTm, 0, sizeof(nowTm));
+    nowTm.tm_year = 70; // 1970
+    nowTm.tm_mday = 1;
+    nowTm.tm_mon = 0;
+  }
+
+  strftime(logPath, sizeof(logPath), "/logs/%Y-%m-%d_%H_%M_%S.log", &nowTm);
+  if (SD.exists(logPath))
+  {
+    for (int i = 1; i < 100; i++)
+    {
+      char candidate[64];
+      snprintf(candidate, sizeof(candidate), "/logs/%04d-%02d-%02d_%02d_%02d_%02d_%d.log",
+               nowTm.tm_year + 1900, nowTm.tm_mon + 1, nowTm.tm_mday,
+               nowTm.tm_hour, nowTm.tm_min, nowTm.tm_sec, i);
+      if (!SD.exists(candidate))
+      {
+        strncpy(logPath, candidate, sizeof(logPath));
+        break;
+      }
+    }
+  }
+
+  if (syslog->startSdLogging(logPath))
+  {
+    syslog->printf("Started SD console logging to %s\n", logPath);
+    return true;
+  }
+  else
+  {
+    syslog->printf("Failed to start SD console logging to %s\n", logPath);
+    return false;
+  }
+}
+
+/**
+ * Stop console logging to SD card
+ */
+void Board320_240::stopSdcardConsoleLog()
+{
+  if (syslog->isSdLogging())
+  {
+    syslog->println("Stopping SD console logging");
+    syslog->stopSdLogging();
+  }
 }
 
 /**

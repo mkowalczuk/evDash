@@ -27,6 +27,8 @@
 #define fontFont7bmp &fonts::Font7
 #endif // BOARD_M5STACK_CORES3
 
+class WebServer;
+
 class Board320_240 : public BoardInterface
 {
 
@@ -222,6 +224,15 @@ public:
   bool sdcardMount() override;
   void sdcardToggleRecording() override;
   void sdcardEraseLogs();
+  void enforceSdLogSpaceLimit();
+  bool startSdcardConsoleLog();
+  void stopSdcardConsoleLog();
+  void runWebLogServer();
+  void drawWebLogServerScreen(const String &ssid, const String &ip, bool isSta);
+  void handleWebLogRoot(WebServer &server);
+  void handleWebLogDownload(WebServer &server);
+  void handleWebLogView(WebServer &server);
+  void handleWebLogDelete(WebServer &server);
   // GPS
   void initGPS();
   void syncGPS();
@@ -245,6 +256,7 @@ public:
   bool canStatusMessageVisible();
   bool canStatusMessageHitTest(int16_t x, int16_t y);
   void dismissCanStatusMessage();
+  inline bool isUpperLeftTouch(int16_t x, int16_t y) const { return x < 64 && y < 64; }
   void showBootProgress(const char *step, const char *detail, uint16_t bgColor = TFT_BLACK);
   // Basic GUI
   void turnOffScreen() override;

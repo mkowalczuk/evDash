@@ -455,6 +455,22 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     sprintf(tmpStr1, "[%s]", (liveData->settings.sdcardEnabled == 1) ? "on" : "off");
     suffix = tmpStr1;
     break;
+  case MENU_SDCARD_CONSOLE_LOG:
+    sprintf(tmpStr1, "[%s]", (liveData->settings.sdcardEnabled == 0) ? "n/a" : (liveData->settings.sdcardConsoleLogEnabled == 1) ? "on"
+                                                                                                                           : "off");
+    suffix = tmpStr1;
+    break;
+  case MENU_SDCARD_LOG_RETENTION:
+    if (liveData->settings.sdcardLogRetention == 0)
+    {
+      suffix = "[unlimited]";
+    }
+    else
+    {
+      sprintf(tmpStr1, "[%d]", liveData->settings.sdcardLogRetention);
+      suffix = tmpStr1;
+    }
+    break;
   case MENU_SDCARD_JSON_TYPE:
     suffix = "[v2]";
     break;
@@ -476,6 +492,10 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     break;
   case MENU_SDCARD_INTERVAL:
     sprintf(tmpStr1, "[%d]", liveData->settings.sdcardLogIntervalSec);
+    suffix = tmpStr1;
+    break;
+  case MENU_SDCARD_WEB_SERVER:
+    sprintf(tmpStr1, "[%s]", (liveData->settings.sdcardEnabled == 0) ? "n/a" : "start");
     suffix = tmpStr1;
     break;
   //
@@ -1698,6 +1718,51 @@ void Board320_240::menuItemClick()
     // Sdcard
     case MENU_SDCARD_ENABLED:
       liveData->settings.sdcardEnabled = (liveData->settings.sdcardEnabled == 1) ? 0 : 1;
+      if (liveData->settings.sdcardEnabled == 0)
+      {
+        stopSdcardConsoleLog();
+      }
+      else if (liveData->settings.sdcardConsoleLogEnabled == 1)
+      {
+        startSdcardConsoleLog();
+      }
+      showMenu();
+      return;
+      break;
+    case MENU_SDCARD_CONSOLE_LOG:
+      if (liveData->settings.sdcardConsoleLogEnabled == 1)
+      {
+        liveData->settings.sdcardConsoleLogEnabled = 0;
+        stopSdcardConsoleLog();
+      }
+      else
+      {
+        liveData->settings.sdcardConsoleLogEnabled = 1;
+        if (liveData->settings.sdcardEnabled == 1)
+        {
+          startSdcardConsoleLog();
+        }
+      }
+      saveSettings();
+      showMenu();
+      return;
+      break;
+    case MENU_SDCARD_LOG_RETENTION:
+      if (liveData->settings.sdcardLogRetention == 1)
+        liveData->settings.sdcardLogRetention = 5;
+      else if (liveData->settings.sdcardLogRetention == 5)
+        liveData->settings.sdcardLogRetention = 10;
+      else if (liveData->settings.sdcardLogRetention == 10)
+        liveData->settings.sdcardLogRetention = 20;
+      else if (liveData->settings.sdcardLogRetention == 20)
+        liveData->settings.sdcardLogRetention = 50;
+      else if (liveData->settings.sdcardLogRetention == 50)
+        liveData->settings.sdcardLogRetention = 100;
+      else if (liveData->settings.sdcardLogRetention == 100)
+        liveData->settings.sdcardLogRetention = 0;
+      else
+        liveData->settings.sdcardLogRetention = 1;
+      saveSettings();
       showMenu();
       return;
       break;
@@ -1813,6 +1878,11 @@ void Board320_240::menuItemClick()
       }
       showMenu();
       sdcardEraseLogs();
+      showMenu();
+      return;
+      break;
+    case MENU_SDCARD_WEB_SERVER:
+      runWebLogServer();
       showMenu();
       return;
       break;
