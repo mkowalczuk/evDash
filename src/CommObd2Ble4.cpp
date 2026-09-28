@@ -157,7 +157,7 @@ class MySecurity : public BLESecurityCallbacks
 
   uint32_t onPassKeyRequest()
   {
-    syslog->printf("Pairing password: %d \r\n", PIN);
+    syslog->printf("Pairing password: %u \r\n", PIN);
     return PIN;
   }
 
@@ -168,7 +168,7 @@ class MySecurity : public BLESecurityCallbacks
 
   bool onConfirmPIN(uint32_t pass_key)
   {
-    syslog->printf("onConfirmPIN\r\n");
+    syslog->printf("onConfirmPIN: %06u (auto-confirmed)\r\n", pass_key);
     return true;
   }
 
@@ -407,8 +407,9 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
   BLEDevice::setSecurityCallbacks(new MySecurity());
 
   BLESecurity *pSecurity = new BLESecurity();
-  pSecurity->setAuthenticationMode(ESP_LE_AUTH_BOND);
+  pSecurity->setAuthenticationMode(ESP_LE_AUTH_REQ_SC_MITM_BOND);
   pSecurity->setCapability(ESP_IO_CAP_KBDISP);
+  pSecurity->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
   pSecurity->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
   // Create BLE client and set callbacks
@@ -439,9 +440,25 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     return false;
   }
 
+  // Auto-detect primary address type:
+  // Random static addresses MUST have bits 7 and 6 of byte 0 set to 1 (0xC0..0xFF).
+  // Addresses starting with other values (like Dialog Semiconductor 48:23:35...) are IEEE Public.
+  const char *macStr = pAddress.toString().c_str();
+  uint8_t firstByte = 0;
+  if (macStr != nullptr && strlen(macStr) >= 2)
+  {
+    firstByte = (uint8_t)strtol(macStr, nullptr, 16);
+  }
+  const bool likelyPublic = ((firstByte & 0xC0) != 0xC0);
+
   // Attempt to connect to the BLE device (async = false, non-blocking call in NimBLE)
 #ifdef EVDASH_USE_NIMBLE
-  bool connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), BLE_ADDR_RANDOM), false);
+  const uint8_t primaryType = likelyPublic ? BLE_ADDR_PUBLIC : BLE_ADDR_RANDOM;
+  const uint8_t fallbackType = likelyPublic ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
+  const char *primaryName = likelyPublic ? "PUBLIC" : "RANDOM";
+  const char *fallbackName = likelyPublic ? "RANDOM" : "PUBLIC";
+
+  bool connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), primaryType), false);
   const uint32_t connStartMs = millis();
   while (!connected && !liveData->pClient->isConnected() && (millis() - connStartMs < 3000))
   {
@@ -458,8 +475,8 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
 
   if (!connected && liveData->obd2ready && !liveData->params.stopCommandQueue)
   {
-    syslog->println("Connect with RANDOM address type failed. Trying PUBLIC...");
-    connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), BLE_ADDR_PUBLIC), false);
+    syslog->printf("Connect with %s address type failed. Trying %s...\n", primaryName, fallbackName);
+    connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), fallbackType), false);
     const uint32_t connStartMs2 = millis();
     while (!connected && !liveData->pClient->isConnected() && (millis() - connStartMs2 < 3000))
     {
@@ -475,14 +492,19 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     connected = liveData->pClient->isConnected();
   }
 #else
-  bool connected = liveData->pClient->connect(pAddress, BLE_ADDR_TYPE_RANDOM);
+  esp_ble_addr_type_t primaryType = likelyPublic ? BLE_ADDR_TYPE_PUBLIC : BLE_ADDR_TYPE_RANDOM;
+  esp_ble_addr_type_t fallbackType = likelyPublic ? BLE_ADDR_TYPE_RANDOM : BLE_ADDR_TYPE_PUBLIC;
+  const char *primaryName = likelyPublic ? "PUBLIC" : "RANDOM";
+  const char *fallbackName = likelyPublic ? "RANDOM" : "PUBLIC";
+
+  bool connected = liveData->pClient->connect(pAddress, primaryType);
   if (!connected && liveData->obd2ready && !liveData->params.stopCommandQueue)
   {
     board->boardLoop();
     if (!liveData->params.stopCommandQueue && liveData->obd2ready)
     {
-      syslog->println("Connect with RANDOM address type failed. Trying PUBLIC...");
-      connected = liveData->pClient->connect(pAddress, BLE_ADDR_TYPE_PUBLIC);
+      syslog->printf("Connect with %s address type failed. Trying %s...\n", primaryName, fallbackName);
+      connected = liveData->pClient->connect(pAddress, fallbackType);
     }
   }
 #endif
@@ -691,15 +713,26 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
 #else
   if (liveData->pRemoteCharacteristic->canNotify())
   {
+    const uint8_t notificationOn[] = {0x1, 0x0};
+    BLERemoteDescriptor *notifyDescriptor = liveData->pRemoteCharacteristic->getDescriptor(BLEUUID((uint16_t)0x2902));
+    if (notifyDescriptor != nullptr)
+    {
+      notifyDescriptor->writeValue((uint8_t *)notificationOn, 2, true);
+    }
+    else
+    {
+      syslog->println("Notify descriptor 0x2902 not found. Registering callback only.");
+    }
+    liveData->pRemoteCharacteristic->registerForNotify(notifyCallback, false);
+    delay(200);
+  }
+  else if (liveData->pRemoteCharacteristic->canIndicate())
+  {
     const uint8_t indicationOn[] = {0x2, 0x0};
     BLERemoteDescriptor *notifyDescriptor = liveData->pRemoteCharacteristic->getDescriptor(BLEUUID((uint16_t)0x2902));
     if (notifyDescriptor != nullptr)
     {
       notifyDescriptor->writeValue((uint8_t *)indicationOn, 2, true);
-    }
-    else
-    {
-      syslog->println("Notify descriptor 0x2902 not found. Registering callback only.");
     }
     liveData->pRemoteCharacteristic->registerForNotify(notifyCallback, false);
     delay(200);
@@ -838,7 +871,9 @@ void CommObd2Ble4::mainLoop()
 void CommObd2Ble4::executeCommand(String cmd)
 {
 
-  String tmpStr = cmd + "\r";
+  String tmpStr = cmd;
+  tmpStr.trim();
+  tmpStr += "\r";
   // Require the write handle too: commConnected can still be true for a moment after
   // a disconnect callback nulls the characteristic pointers.
   if (liveData->commConnected && liveData->pRemoteCharacteristicWrite != nullptr)
@@ -847,7 +882,14 @@ void CommObd2Ble4::executeCommand(String cmd)
     // prepend itself to this command's response (responseRow persists across
     // BLE notifications, see notifyCallback).
     liveData->responseRow = "";
-    liveData->pRemoteCharacteristicWrite->writeValue(tmpStr.c_str(), tmpStr.length());
+    if (liveData->pRemoteCharacteristicWrite->canWrite())
+    {
+      liveData->pRemoteCharacteristicWrite->writeValue((uint8_t *)tmpStr.c_str(), tmpStr.length(), true);
+    }
+    else
+    {
+      liveData->pRemoteCharacteristicWrite->writeValue((uint8_t *)tmpStr.c_str(), tmpStr.length(), false);
+    }
     lastBleCmdSentMs = millis(); // arm the queue-stall watchdog
   }
 }
