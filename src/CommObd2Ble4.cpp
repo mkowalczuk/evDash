@@ -11,10 +11,9 @@ namespace
 {
   constexpr uint32_t kBleConnectRetryBaseMs = 3000;
   constexpr uint32_t kBleConnectRetryMaxMs = 15000;
-  // Queue-stall watchdog: if the ELM327 '>' prompt is lost (packet loss / frozen
-  // adapter), canSendNextAtCommand never goes true again and the whole OBD queue
-  // hangs until reboot. Re-arm the queue if no '>' arrives within this window.
   constexpr uint32_t kBleCmdTimeoutMs = 4000;
+  constexpr uint8_t kBleMaxStallRetries = 3;
+  uint8_t bleStallRetryCount = 0;
 
   // BLE connect/disconnect events are signalled from the BLE callback task and the
   // user-facing message is rendered later from the loop task (TFT/sprite work must
@@ -225,6 +224,7 @@ static void notifyCallback(BLERemoteCharacteristic *pBLERemoteCharacteristic, ui
       liveDataObj->responseRow += ch;
       if (liveDataObj->responseRow == ">")
       {
+        bleStallRetryCount = 0;
         if (liveDataObj->responseRowMerged != "")
         {
           syslog->infoNolf(DEBUG_COMM, "merged: ");
@@ -356,16 +356,49 @@ void CommObd2Ble4::startBleScan()
   }
 }
 
+namespace
+{
+  bool isKnownObdService(const String &sUuid, const String &configuredUuid)
+  {
+    if (configuredUuid.length() > 0 && sUuid.indexOf(configuredUuid) != -1)
+      return true;
+    if (sUuid.indexOf("fff0") != -1 ||      // OBDLink CX, Veepeak, Viecar, generic ELM327
+        sUuid.indexOf("18f0") != -1 ||      // Vgate iCar Pro, vLinker MC/FD
+        sUuid.indexOf("ffe0") != -1 ||      // LELink, HM-10 / CC2541 / Carista / Viecar
+        sUuid.indexOf("ffe5") != -1 ||      // Generic ELM327 BLE clones
+        sUuid.indexOf("a001") != -1 ||      // Generic OBD BLE dongles
+        sUuid.indexOf("6e400001") != -1 ||  // Nordic UART Service (nRF NUS)
+        sUuid.indexOf("e7810a71") != -1)    // OBDLink proprietary
+      return true;
+    return false;
+  }
+
+  bool isNonObdOrOtaService(const String &sUuid)
+  {
+    return (sUuid.indexOf("1800") != -1 ||      // Generic Access
+            sUuid.indexOf("1801") != -1 ||      // Generic Attribute
+            sUuid.indexOf("180a") != -1 ||      // Device Information
+            sUuid.indexOf("1804") != -1 ||      // Tx Power
+            sUuid.indexOf("180f") != -1 ||      // Battery Service
+            sUuid.indexOf("fef5") != -1 ||      // Dialog SUOTA OTA
+            sUuid.indexOf("fe59") != -1 ||      // Nordic DFU OTA
+            sUuid.indexOf("8e400001") != -1 ||  // Nordic DFU OTA (128-bit)
+            sUuid.indexOf("f000ffc0") != -1);   // TI OAD OTA
+  }
+} // namespace
+
 /**
    Connect to BLE device and automatically detect service and characteristics
 */
 bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
 {
-  board->displayMessage(" > Connecting device", "");
+  String devName = strlen(liveData->settings.obd2Name) > 0 ? liveData->settings.obd2Name : "OBD BLE Adapter";
+  String devMac = String("(") + pAddress.toString().c_str() + ")";
+  connectStatus = "Connecting...";
+  board->displayMessage(" > Connecting device", devName.c_str(), devMac.c_str());
 
   syslog->print("Connecting to device: ");
   syslog->println(pAddress.toString().c_str());
-  board->displayMessage(" > Connecting device - init", pAddress.toString().c_str());
 
   // Set BLE encryption and security
 #ifndef EVDASH_USE_NIMBLE
@@ -379,7 +412,6 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
   pSecurity->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
   // Create BLE client and set callbacks
-  board->displayMessage(" > Connecting device", pAddress.toString().c_str());
   if (liveData->pClient == nullptr)
   {
     liveData->pClient = BLEDevice::createClient();
@@ -395,32 +427,82 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     liveData->pClient->disconnect();
   }
 
-  // Attempt to connect to the BLE device.
-  // Most adapters use random address type, but some use public type.
 #ifdef EVDASH_USE_NIMBLE
-  bool connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), BLE_ADDR_RANDOM));
-  if (!connected)
+  liveData->pClient->setConnectTimeout(3); // 3 seconds timeout
+#endif
+
+  // Poll hardware buttons/touch input before initiating connection
+  board->boardLoop();
+  if (liveData->params.stopCommandQueue || !liveData->obd2ready)
+  {
+    syslog->println("Connection attempt cancelled by user input.");
+    return false;
+  }
+
+  // Attempt to connect to the BLE device (async = false, non-blocking call in NimBLE)
+#ifdef EVDASH_USE_NIMBLE
+  bool connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), BLE_ADDR_RANDOM), false);
+  const uint32_t connStartMs = millis();
+  while (!connected && !liveData->pClient->isConnected() && (millis() - connStartMs < 3000))
+  {
+    board->boardLoop();
+    if (liveData->params.stopCommandQueue || !liveData->obd2ready)
+    {
+      syslog->println("Connection attempt cancelled by user input during async connect.");
+      liveData->pClient->disconnect();
+      return false;
+    }
+    delay(20);
+  }
+  connected = liveData->pClient->isConnected();
+
+  if (!connected && liveData->obd2ready && !liveData->params.stopCommandQueue)
   {
     syslog->println("Connect with RANDOM address type failed. Trying PUBLIC...");
-    connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), BLE_ADDR_PUBLIC));
+    connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), BLE_ADDR_PUBLIC), false);
+    const uint32_t connStartMs2 = millis();
+    while (!connected && !liveData->pClient->isConnected() && (millis() - connStartMs2 < 3000))
+    {
+      board->boardLoop();
+      if (liveData->params.stopCommandQueue || !liveData->obd2ready)
+      {
+        syslog->println("Connection attempt cancelled by user input during async connect.");
+        liveData->pClient->disconnect();
+        return false;
+      }
+      delay(20);
+    }
+    connected = liveData->pClient->isConnected();
   }
 #else
   bool connected = liveData->pClient->connect(pAddress, BLE_ADDR_TYPE_RANDOM);
-  if (!connected)
+  if (!connected && liveData->obd2ready && !liveData->params.stopCommandQueue)
   {
-    syslog->println("Connect with RANDOM address type failed. Trying PUBLIC...");
-    connected = liveData->pClient->connect(pAddress, BLE_ADDR_TYPE_PUBLIC);
+    board->boardLoop();
+    if (!liveData->params.stopCommandQueue && liveData->obd2ready)
+    {
+      syslog->println("Connect with RANDOM address type failed. Trying PUBLIC...");
+      connected = liveData->pClient->connect(pAddress, BLE_ADDR_TYPE_PUBLIC);
+    }
   }
 #endif
+
+  if (liveData->params.stopCommandQueue || !liveData->obd2ready)
+  {
+    syslog->println("Connection cancelled during BLE connect.");
+    if (connected && liveData->pClient && liveData->pClient->isConnected())
+    {
+      liveData->pClient->disconnect();
+    }
+    return false;
+  }
 
   if (!connected)
   {
     syslog->println("Failed to connect to BLE device.");
-    board->displayMessage("Connection failed", "Will retry...");
     return false;
   }
   syslog->println("Successfully connected to BLE device.");
-  board->displayMessage("> Successfully connected", pAddress.toString().c_str());
 
   // Discover all services. NimBLE returns a vector, Bluedroid a map.
   liveData->pRemoteCharacteristic = nullptr;
@@ -435,31 +517,72 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     return false;
   }
 
+  String configuredUuid = String(liveData->settings.serviceUUID);
+  configuredUuid.toLowerCase();
+  configuredUuid.trim();
+
+  // Pass 1: Prioritize known OBD-II Serial GATT Services & configured serviceUUID
   for (auto *pRemoteService : *services)
   {
+    String sUuid = pRemoteService->getUUID().toString().c_str();
+    sUuid.toLowerCase();
     syslog->print("Detected service UUID: ");
-    syslog->println(pRemoteService->getUUID().toString().c_str());
+    syslog->println(sUuid.c_str());
 
+    if (!isKnownObdService(sUuid, configuredUuid))
+      continue;
+
+    syslog->println("Matched known OBD serial service.");
     std::vector<BLERemoteCharacteristic *> *characteristics = pRemoteService->getCharacteristics(true);
     for (auto *pCharacteristic : *characteristics)
     {
-      if (pCharacteristic->canNotify() && liveData->pRemoteCharacteristic == nullptr)
+      if ((pCharacteristic->canNotify() || pCharacteristic->canIndicate()) && liveData->pRemoteCharacteristic == nullptr)
       {
         liveData->pRemoteCharacteristic = pCharacteristic;
         syslog->print("Detected Tx characteristic UUID: ");
         syslog->println(pCharacteristic->getUUID().toString().c_str());
       }
-      if (pCharacteristic->canWrite() && liveData->pRemoteCharacteristicWrite == nullptr)
+      if ((pCharacteristic->canWrite() || pCharacteristic->canWriteNoResponse()) && liveData->pRemoteCharacteristicWrite == nullptr)
       {
         liveData->pRemoteCharacteristicWrite = pCharacteristic;
         syslog->print("Detected Rx characteristic UUID: ");
         syslog->println(pCharacteristic->getUUID().toString().c_str());
       }
-      if (liveData->pRemoteCharacteristic && liveData->pRemoteCharacteristicWrite)
-        break;
     }
     if (liveData->pRemoteCharacteristic && liveData->pRemoteCharacteristicWrite)
       break;
+  }
+
+  // Pass 2: Fallback scan for unknown adapters (skipping non-OBD/OTA services)
+  if (liveData->pRemoteCharacteristic == nullptr || liveData->pRemoteCharacteristicWrite == nullptr)
+  {
+    for (auto *pRemoteService : *services)
+    {
+      String sUuid = pRemoteService->getUUID().toString().c_str();
+      sUuid.toLowerCase();
+
+      if (isNonObdOrOtaService(sUuid))
+        continue;
+
+      std::vector<BLERemoteCharacteristic *> *characteristics = pRemoteService->getCharacteristics(true);
+      for (auto *pCharacteristic : *characteristics)
+      {
+        if ((pCharacteristic->canNotify() || pCharacteristic->canIndicate()) && liveData->pRemoteCharacteristic == nullptr)
+        {
+          liveData->pRemoteCharacteristic = pCharacteristic;
+          syslog->print("Detected Tx characteristic UUID (fallback): ");
+          syslog->println(pCharacteristic->getUUID().toString().c_str());
+        }
+        if ((pCharacteristic->canWrite() || pCharacteristic->canWriteNoResponse()) && liveData->pRemoteCharacteristicWrite == nullptr)
+        {
+          liveData->pRemoteCharacteristicWrite = pCharacteristic;
+          syslog->print("Detected Rx characteristic UUID (fallback): ");
+          syslog->println(pCharacteristic->getUUID().toString().c_str());
+        }
+      }
+      if (liveData->pRemoteCharacteristic && liveData->pRemoteCharacteristicWrite)
+        break;
+    }
   }
 #else
   std::map<std::string, BLERemoteService *> *services = liveData->pClient->getServices();
@@ -470,33 +593,76 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     return false;
   }
 
+  String configuredUuid = String(liveData->settings.serviceUUID);
+  configuredUuid.toLowerCase();
+  configuredUuid.trim();
+
+  // Pass 1: Prioritize known OBD-II Serial GATT Services & configured serviceUUID
   for (auto const &entry : *services)
   {
     BLERemoteService *pRemoteService = entry.second;
+    String sUuid = String(entry.first.c_str());
+    sUuid.toLowerCase();
     syslog->print("Detected service UUID: ");
-    syslog->println(entry.first.c_str());
+    syslog->println(sUuid.c_str());
 
+    if (!isKnownObdService(sUuid, configuredUuid))
+      continue;
+
+    syslog->println("Matched known OBD serial service.");
     std::map<std::string, BLERemoteCharacteristic *> *characteristics = pRemoteService->getCharacteristics();
     for (auto const &charEntry : *characteristics)
     {
       BLERemoteCharacteristic *pCharacteristic = charEntry.second;
-      if (pCharacteristic->canNotify() && liveData->pRemoteCharacteristic == nullptr)
+      if ((pCharacteristic->canNotify() || pCharacteristic->canIndicate()) && liveData->pRemoteCharacteristic == nullptr)
       {
         liveData->pRemoteCharacteristic = pCharacteristic;
         syslog->print("Detected Tx characteristic UUID: ");
         syslog->println(charEntry.first.c_str());
       }
-      if (pCharacteristic->canWrite() && liveData->pRemoteCharacteristicWrite == nullptr)
+      if ((pCharacteristic->canWrite() || pCharacteristic->canWriteNoResponse()) && liveData->pRemoteCharacteristicWrite == nullptr)
       {
         liveData->pRemoteCharacteristicWrite = pCharacteristic;
         syslog->print("Detected Rx characteristic UUID: ");
         syslog->println(charEntry.first.c_str());
       }
-      if (liveData->pRemoteCharacteristic && liveData->pRemoteCharacteristicWrite)
-        break;
     }
     if (liveData->pRemoteCharacteristic && liveData->pRemoteCharacteristicWrite)
       break;
+  }
+
+  // Pass 2: Fallback scan for unknown adapters (skipping non-OBD/OTA services)
+  if (liveData->pRemoteCharacteristic == nullptr || liveData->pRemoteCharacteristicWrite == nullptr)
+  {
+    for (auto const &entry : *services)
+    {
+      BLERemoteService *pRemoteService = entry.second;
+      String sUuid = String(entry.first.c_str());
+      sUuid.toLowerCase();
+
+      if (isNonObdOrOtaService(sUuid))
+        continue;
+
+      std::map<std::string, BLERemoteCharacteristic *> *characteristics = pRemoteService->getCharacteristics();
+      for (auto const &charEntry : *characteristics)
+      {
+        BLERemoteCharacteristic *pCharacteristic = charEntry.second;
+        if ((pCharacteristic->canNotify() || pCharacteristic->canIndicate()) && liveData->pRemoteCharacteristic == nullptr)
+        {
+          liveData->pRemoteCharacteristic = pCharacteristic;
+          syslog->print("Detected Tx characteristic UUID (fallback): ");
+          syslog->println(charEntry.first.c_str());
+        }
+        if ((pCharacteristic->canWrite() || pCharacteristic->canWriteNoResponse()) && liveData->pRemoteCharacteristicWrite == nullptr)
+        {
+          liveData->pRemoteCharacteristicWrite = pCharacteristic;
+          syslog->print("Detected Rx characteristic UUID (fallback): ");
+          syslog->println(charEntry.first.c_str());
+        }
+      }
+      if (liveData->pRemoteCharacteristic && liveData->pRemoteCharacteristicWrite)
+        break;
+    }
   }
 #endif
 
@@ -512,16 +678,14 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
 
   // Enable indications on the Tx characteristic (CCCD = {0x02,0x00}).
 #ifdef EVDASH_USE_NIMBLE
-  // NimBLE writes the CCCD itself: subscribe(false,...) = indications, matching the
-  // old {0x02,0x00} write + registerForNotify(cb, false). Fall back to notifications.
-  if (liveData->pRemoteCharacteristic->canIndicate())
-  {
-    liveData->pRemoteCharacteristic->subscribe(false, notifyCallback, true);
-    delay(200);
-  }
-  else if (liveData->pRemoteCharacteristic->canNotify())
+  if (liveData->pRemoteCharacteristic->canNotify())
   {
     liveData->pRemoteCharacteristic->subscribe(true, notifyCallback, true);
+    delay(200);
+  }
+  else if (liveData->pRemoteCharacteristic->canIndicate())
+  {
+    liveData->pRemoteCharacteristic->subscribe(false, notifyCallback, true);
     delay(200);
   }
 #else
@@ -564,20 +728,46 @@ void CommObd2Ble4::mainLoop()
     board->displayMessage(connEvent == 1 ? "BLE connected" : "BLE disconnected", "");
   }
 
-  // Queue-stall watchdog: if we sent a command but never got the '>' prompt back,
-  // flush the stale partial response and re-arm the queue so it doesn't hang forever.
+  // Prompt watchdog: if a command was sent but we didn't get the '>' prompt back,
+  // do NOT advance to new commands. Retry sending carriage return to prompt the adapter.
+  // If the adapter remains unresponsive after retries, disconnect and reconnect cleanly.
   if (liveData->commConnected && !liveData->canSendNextAtCommand &&
       lastBleCmdSentMs != 0 && (uint32_t)(millis() - lastBleCmdSentMs) > kBleCmdTimeoutMs)
   {
-    syslog->println("BLE queue stall: no '>' prompt, re-arming command queue.");
-    liveData->responseRow = "";
-    liveData->responseRowMerged = "";
-    liveData->canSendNextAtCommand = true;
-    lastBleCmdSentMs = millis();
+    if (bleStallRetryCount < kBleMaxStallRetries)
+    {
+      bleStallRetryCount++;
+      syslog->print("BLE prompt missing for [");
+      syslog->print(liveData->commandRequest);
+      syslog->print("]. Sending prompt retry (");
+      syslog->print(bleStallRetryCount);
+      syslog->print("/");
+      syslog->print(kBleMaxStallRetries);
+      syslog->println(")...");
+      // Do NOT set canSendNextAtCommand - do not advance to new commands without prompt!
+      executeCommand("");
+      lastBleCmdSentMs = millis();
+    }
+    else
+    {
+      syslog->println("BLE adapter unresponsive: no '>' prompt after retries. Disconnecting to recover.");
+      bleStallRetryCount = 0;
+      lastBleCmdSentMs = 0;
+      liveData->responseRow = "";
+      liveData->responseRowMerged = "";
+      liveData->canSendNextAtCommand = false;
+      liveData->commandQueueIndex = 0;
+      if (liveData->pClient != nullptr && liveData->pClient->isConnected())
+      {
+        liveData->pClient->disconnect();
+      }
+      liveData->commConnected = false;
+      liveData->obd2ready = true;
+    }
   }
 
   // Connect BLE device
-  if (liveData->obd2ready == true && hasConfiguredBleMac(liveData->settings.obdMacAddress))
+  if (!liveData->commConnected && liveData->obd2ready == true && hasConfiguredBleMac(liveData->settings.obdMacAddress))
   {
     if (liveData->menuVisible)
     {
@@ -596,28 +786,37 @@ void CommObd2Ble4::mainLoop()
         {
 
           liveData->commConnected = true;
-          liveData->obd2ready = false;
           connectFailCount = 0;
           nextConnectRetryMs = 0;
+          bleStallRetryCount = 0;
 
           syslog->println("We are now connected to the BLE device.");
           connectStatus = "Connected";
 
-          // Print message
-          board->displayMessage(" > Processing init AT cmds", "");
+          // Clear popup dialog so dashboard is accessible and modal window disappears
+          board->dismissMessageDialog();
 
           // Serve first command (ATZ)
           doNextQueueCommand();
         }
         else
         {
-          board->displayMessage("> Can not connect BLE", "");
           syslog->println("We have failed to connect to the server; scheduling retry.");
-          if (connectFailCount < 0xFF)
-            connectFailCount++;
-          const uint32_t retryDelayMs = calcConnectRetryDelayMs(connectFailCount);
-          nextConnectRetryMs = nowMs + retryDelayMs;
-          connectStatus = String("Retry in ") + String(retryDelayMs / 1000) + "s";
+          if (!suspendedDevice && !liveData->params.stopCommandQueue)
+          {
+            if (connectFailCount < 0xFF)
+              connectFailCount++;
+            const uint32_t retryDelayMs = calcConnectRetryDelayMs(connectFailCount);
+            nextConnectRetryMs = nowMs + retryDelayMs;
+            connectStatus = String("Retry in ") + String(retryDelayMs / 1000) + " s";
+          }
+          else
+          {
+            connectFailCount = 0;
+            nextConnectRetryMs = 0;
+            connectStatus = "Cancelled";
+            board->dismissMessageDialog();
+          }
         }
       }
     }

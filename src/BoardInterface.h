@@ -46,7 +46,9 @@ public:
   virtual void ntpSync() = 0;
   // Graphics & GUI
   virtual void displayMessage(const char *row1, const char *row2) = 0;
+  virtual void displayMessage(const char *row1, const char *row2, const char *row3) { displayMessage(row1, row2); }
   virtual bool confirmMessage(const char *row1, const char *row2) { return false; }
+  virtual bool dismissMessageDialog() { return false; }
   virtual void turnOffScreen() = 0;
   virtual void setBrightness() = 0;
   void calcAutomaticBrightnessLatLon();
