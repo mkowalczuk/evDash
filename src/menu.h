@@ -2,7 +2,7 @@
 
 #include "config.h"
 
-#define MENU_SIZE 230
+#define MENU_SIZE 240
 
 const MENU_ITEM menuItemsSource[MENU_SIZE] = {
     //   menu_id,                       parent_menu,        target_menu,    menu_str
@@ -98,6 +98,7 @@ const MENU_ITEM menuItemsSource[MENU_SIZE] = {
     {MENU_ADAPTER_BLE_SELECT, MENU_ADAPTER_TYPE, MENU_NO_MENU, "Search BLE4 adapter"},
     {MENU_ADAPTER_OBD2_BLE4, MENU_ADAPTER_TYPE, MENU_NO_MENU, "Obd2 Bluetooth4 (BLE4)"},
     {MENU_ADAPTER_OBD2_NAME, MENU_ADAPTER_TYPE, MENU_NO_MENU, "[i] BLE4 name:"},
+    {MENU_ADAPTER_BLE_ADDR_TYPE, MENU_ADAPTER_TYPE, MENU_NO_MENU, "BLE MAC type"},
     {MENU_ADAPTER_COMMAND_QUEUE_AUTOSTOP, MENU_ADAPTER_TYPE, MENU_NO_MENU, "CAN queue autostop"},
     {MENU_ADAPTER_DISABLE_COMMAND_OPTIMIZER, MENU_ADAPTER_TYPE, MENU_NO_MENU, "Command optimizer"},
     {MENU_ADAPTER_MOBILE_RELAY, MENU_ADAPTER_TYPE, MENU_NO_MENU, "iOS/Android relay"},

@@ -125,7 +125,11 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 28
+#define SETTINGS_VERSION_CURRENT 29
+
+// BLE MAC address connection types
+#define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
+#define BLE_ADDRESS_TYPE_PUBLIC 1 // Public first, fallback Random
 
 //
 #define MONTH_SEC 2678400
@@ -462,6 +466,8 @@ typedef struct
   // == settings version 28
   char webLogServerPassword[16];   // AP password for on-demand web server (8 alphanumeric chars)
   uint8_t sdcardLogRetention;      // Preserve last X logs: 1, 5, 10, 20, 50, 100, 0 (unlimited)
+  // == settings version 29
+  uint8_t bleAddressType;          // 0 - Random first (fallback Public), 1 - Public first (fallback Random)
   //
 } SETTINGS_STRUC;
 

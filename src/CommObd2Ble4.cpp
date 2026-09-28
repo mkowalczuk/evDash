@@ -358,19 +358,30 @@ void CommObd2Ble4::startBleScan()
 
 namespace
 {
-  bool isKnownObdService(const String &sUuid, const String &configuredUuid)
+  const char *getKnownObdServiceName(const String &sUuid, const String &configuredUuid)
   {
     if (configuredUuid.length() > 0 && sUuid.indexOf(configuredUuid) != -1)
-      return true;
-    if (sUuid.indexOf("fff0") != -1 ||      // OBDLink CX, Veepeak, Viecar, generic ELM327
-        sUuid.indexOf("18f0") != -1 ||      // Vgate iCar Pro, vLinker MC/FD
-        sUuid.indexOf("ffe0") != -1 ||      // LELink, HM-10 / CC2541 / Carista / Viecar
-        sUuid.indexOf("ffe5") != -1 ||      // Generic ELM327 BLE clones
-        sUuid.indexOf("a001") != -1 ||      // Generic OBD BLE dongles
-        sUuid.indexOf("6e400001") != -1 ||  // Nordic UART Service (nRF NUS)
-        sUuid.indexOf("e7810a71") != -1)    // OBDLink proprietary
-      return true;
-    return false;
+      return "Configured service UUID";
+    if (sUuid.indexOf("fff0") != -1)
+      return "OBDLink CX / Veepeak / Viecar (0xFFF0)";
+    if (sUuid.indexOf("18f0") != -1)
+      return "Vgate iCar Pro / vLinker (0x18F0)";
+    if (sUuid.indexOf("ffe0") != -1)
+      return "LELink / HM-10 / Carista (0xFFE0)";
+    if (sUuid.indexOf("ffe5") != -1)
+      return "Generic ELM327 clone (0xFFE5)";
+    if (sUuid.indexOf("a001") != -1)
+      return "Generic OBD BLE (0xA001)";
+    if (sUuid.indexOf("6e400001") != -1)
+      return "Nordic UART Service NUS (6e400001)";
+    if (sUuid.indexOf("e7810a71") != -1)
+      return "OBDLink proprietary (e7810a71)";
+    return nullptr;
+  }
+
+  bool isKnownObdService(const String &sUuid, const String &configuredUuid)
+  {
+    return getKnownObdServiceName(sUuid, configuredUuid) != nullptr;
   }
 
   bool isNonObdOrOtaService(const String &sUuid)
@@ -440,23 +451,35 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     return false;
   }
 
-  // Auto-detect primary address type:
+  // Determine primary address type:
   // Random static addresses MUST have bits 7 and 6 of byte 0 set to 1 (0xC0..0xFF).
   // Addresses starting with other values (like Dialog Semiconductor 48:23:35...) are IEEE Public.
-  const char *macStr = pAddress.toString().c_str();
-  uint8_t firstByte = 0;
-  if (macStr != nullptr && strlen(macStr) >= 2)
+  bool usePublicFirst = false;
+  if (liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC)
   {
-    firstByte = (uint8_t)strtol(macStr, nullptr, 16);
+    usePublicFirst = true;
   }
-  const bool likelyPublic = ((firstByte & 0xC0) != 0xC0);
+  else if (liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_RANDOM)
+  {
+    usePublicFirst = false;
+  }
+  else // BLE_ADDRESS_TYPE_AUTO
+  {
+    const char *macStr = pAddress.toString().c_str();
+    uint8_t firstByte = 0;
+    if (macStr != nullptr && strlen(macStr) >= 2)
+    {
+      firstByte = (uint8_t)strtol(macStr, nullptr, 16);
+    }
+    usePublicFirst = ((firstByte & 0xC0) != 0xC0);
+  }
 
   // Attempt to connect to the BLE device (async = false, non-blocking call in NimBLE)
 #ifdef EVDASH_USE_NIMBLE
-  const uint8_t primaryType = likelyPublic ? BLE_ADDR_PUBLIC : BLE_ADDR_RANDOM;
-  const uint8_t fallbackType = likelyPublic ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
-  const char *primaryName = likelyPublic ? "PUBLIC" : "RANDOM";
-  const char *fallbackName = likelyPublic ? "RANDOM" : "PUBLIC";
+  const uint8_t primaryType = usePublicFirst ? BLE_ADDR_PUBLIC : BLE_ADDR_RANDOM;
+  const uint8_t fallbackType = usePublicFirst ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
+  const char *primaryName = usePublicFirst ? "PUBLIC" : "RANDOM";
+  const char *fallbackName = usePublicFirst ? "RANDOM" : "PUBLIC";
 
   bool connected = liveData->pClient->connect(BLEAddress(pAddress.toString(), primaryType), false);
   const uint32_t connStartMs = millis();
@@ -492,10 +515,10 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     connected = liveData->pClient->isConnected();
   }
 #else
-  esp_ble_addr_type_t primaryType = likelyPublic ? BLE_ADDR_TYPE_PUBLIC : BLE_ADDR_TYPE_RANDOM;
-  esp_ble_addr_type_t fallbackType = likelyPublic ? BLE_ADDR_TYPE_RANDOM : BLE_ADDR_TYPE_PUBLIC;
-  const char *primaryName = likelyPublic ? "PUBLIC" : "RANDOM";
-  const char *fallbackName = likelyPublic ? "RANDOM" : "PUBLIC";
+  esp_ble_addr_type_t primaryType = usePublicFirst ? BLE_ADDR_TYPE_PUBLIC : BLE_ADDR_TYPE_RANDOM;
+  esp_ble_addr_type_t fallbackType = usePublicFirst ? BLE_ADDR_TYPE_RANDOM : BLE_ADDR_TYPE_PUBLIC;
+  const char *primaryName = usePublicFirst ? "PUBLIC" : "RANDOM";
+  const char *fallbackName = usePublicFirst ? "RANDOM" : "PUBLIC";
 
   bool connected = liveData->pClient->connect(pAddress, primaryType);
   if (!connected && liveData->obd2ready && !liveData->params.stopCommandQueue)
@@ -551,10 +574,11 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     syslog->print("Detected service UUID: ");
     syslog->println(sUuid.c_str());
 
-    if (!isKnownObdService(sUuid, configuredUuid))
+    const char *serviceDesc = getKnownObdServiceName(sUuid, configuredUuid);
+    if (serviceDesc == nullptr)
       continue;
 
-    syslog->println("Matched known OBD serial service.");
+    syslog->printf("Matched known OBD serial service: %s [%s]\n", serviceDesc, sUuid.c_str());
     std::vector<BLERemoteCharacteristic *> *characteristics = pRemoteService->getCharacteristics(true);
     for (auto *pCharacteristic : *characteristics)
     {
@@ -628,10 +652,11 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     syslog->print("Detected service UUID: ");
     syslog->println(sUuid.c_str());
 
-    if (!isKnownObdService(sUuid, configuredUuid))
+    const char *serviceDesc = getKnownObdServiceName(sUuid, configuredUuid);
+    if (serviceDesc == nullptr)
       continue;
 
-    syslog->println("Matched known OBD serial service.");
+    syslog->printf("Matched known OBD serial service: %s [%s]\n", serviceDesc, sUuid.c_str());
     std::map<std::string, BLERemoteCharacteristic *> *characteristics = pRemoteService->getCharacteristics();
     for (auto const &charEntry : *characteristics)
     {
