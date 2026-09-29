@@ -292,8 +292,11 @@ void BoardInterface::loadSettings()
   // v28
   generateRandomAlphanumeric(liveData->settings.webLogServerPassword, 8);
   // v29
-  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
   liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
+  // v30
+  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
+  liveData->settings.mqttUseTls = 0;
+  liveData->settings.mqttPort = 0;
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -518,8 +521,14 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 28)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 29;
         liveData->tmpSettings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
+      }
+      if (liveData->tmpSettings.settingsVersion == 29)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.mqttUseTls = 0;
+        liveData->tmpSettings.mqttPort = 0;
       }
 
       // Save upgraded structure
@@ -757,6 +766,135 @@ bool BoardInterface::customConsoleCommand(String cmd)
     return true;
   }
 
+  if (cmd.equalsIgnoreCase("testMqtt") || cmd.equalsIgnoreCase("sendMqtt"))
+  {
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      syslog->print("WiFi not connected. Status: ");
+      syslog->println(WiFi.status());
+      return true;
+    }
+    bool tempEnabled = false;
+    if (liveData->settings.mqttEnabled != 1)
+    {
+      syslog->println("Note: MQTT is disabled (mqttEnabled=0). Enabling temporarily for test...");
+      liveData->settings.mqttEnabled = 1;
+      tempEnabled = true;
+    }
+    syslog->println("Triggering MQTT send test...");
+    bool prevDebugNet = (liveData->settings.debugLevel & DEBUG_NET) != 0;
+    liveData->settings.debugLevel |= DEBUG_NET;
+    syslog->setDebugLevel(liveData->settings.debugLevel);
+    bool res = netSendData(false);
+    if (!prevDebugNet)
+    {
+      liveData->settings.debugLevel &= ~DEBUG_NET;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+    }
+    if (tempEnabled)
+    {
+      liveData->settings.mqttEnabled = 0;
+      disconnectMqtt(false);
+      syslog->println("Note: MQTT reverted to disabled (run 'mqttEnabled=1' or use menu to enable for background upload).");
+    }
+    syslog->print("MQTT test finished. Result: ");
+    syslog->println(res ? "OK" : "FAILED");
+    return true;
+  }
+
+  // MQTT getters
+  if (cmd.equalsIgnoreCase("mqtt") || cmd.equalsIgnoreCase("showMqtt"))
+  {
+    syslog->println("MQTT settings:");
+    syslog->printf("  enabled:  %s\n", (liveData->settings.mqttEnabled == 1) ? "ON" : "OFF");
+    syslog->printf("  secure:   %s\n", (liveData->settings.mqttUseTls == 1) ? "ON (TLS)" : "OFF (plain)");
+    syslog->printf("  server:   %s\n", liveData->settings.mqttServer);
+    if (liveData->settings.mqttPort == 0)
+    {
+      syslog->printf("  port:     0 (default: %u)\n", (liveData->settings.mqttUseTls == 1) ? 8883 : 1883);
+    }
+    else
+    {
+      syslog->printf("  port:     %u\n", liveData->settings.mqttPort);
+    }
+    syslog->printf("  id:       %s\n", liveData->settings.mqttId);
+    syslog->printf("  user:     %s\n", liveData->settings.mqttUsername);
+    syslog->printf("  passwd:   %s\n", (strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
+    syslog->printf("  topic:    %s\n", liveData->settings.mqttPubTopic);
+    syslog->printf("  interval: %u sec%s\n",
+                   liveData->settings.remoteUploadIntervalSec,
+                   (liveData->settings.remoteUploadIntervalSec == 0) ? " (auto 60s)" : "");
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttInterval"))
+  {
+    syslog->print("MQTT upload interval: ");
+    if (liveData->settings.remoteUploadIntervalSec == 0)
+    {
+      syslog->println("0 (auto 60s)");
+    }
+    else
+    {
+      syslog->printf("%u sec\n", liveData->settings.remoteUploadIntervalSec);
+    }
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttEnabled"))
+  {
+    syslog->print("MQTT enabled: ");
+    syslog->println((liveData->settings.mqttEnabled == 1) ? "ON" : "OFF");
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttSecure") || cmd.equalsIgnoreCase("mqttTls") || cmd.equalsIgnoreCase("mqttUseTls"))
+  {
+    syslog->print("MQTT TLS/secure: ");
+    syslog->println((liveData->settings.mqttUseTls == 1) ? "ON" : "OFF");
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttPort"))
+  {
+    syslog->print("MQTT port: ");
+    if (liveData->settings.mqttPort == 0)
+    {
+      syslog->printf("0 (default: %u)\n", (liveData->settings.mqttUseTls == 1) ? 8883 : 1883);
+    }
+    else
+    {
+      syslog->println(liveData->settings.mqttPort);
+    }
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttServer"))
+  {
+    syslog->print("MQTT server: ");
+    syslog->println(liveData->settings.mqttServer);
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttId"))
+  {
+    syslog->print("MQTT id: ");
+    syslog->println(liveData->settings.mqttId);
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttUsername") || cmd.equalsIgnoreCase("mqttUser"))
+  {
+    syslog->print("MQTT username: ");
+    syslog->println(liveData->settings.mqttUsername);
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttPassword") || cmd.equalsIgnoreCase("mqttPasswd"))
+  {
+    syslog->print("MQTT password: ");
+    syslog->println((strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttPubTopic") || cmd.equalsIgnoreCase("mqttTopic"))
+  {
+    syslog->print("MQTT topic: ");
+    syslog->println(liveData->settings.mqttPubTopic);
+    return true;
+  }
+
   int8_t idx = cmd.indexOf("=");
   if (idx == -1)
     return false;
@@ -882,29 +1020,108 @@ bool BoardInterface::customConsoleCommand(String cmd)
   }
 
   // Mqtt
+  if (key.equalsIgnoreCase("mqttEnabled"))
+  {
+    liveData->settings.mqttEnabled = (value == "1" || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("on")) ? 1 : 0;
+    syslog->print("MQTT enabled set to: ");
+    syslog->println((liveData->settings.mqttEnabled == 1) ? "ON" : "OFF");
+    saveSettings();
+    disconnectMqtt(false);
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttSecure") || key.equalsIgnoreCase("mqttTls") || key.equalsIgnoreCase("mqttUseTls"))
+  {
+    liveData->settings.mqttUseTls = (value == "1" || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("on")) ? 1 : 0;
+    syslog->print("MQTT TLS/secure set to: ");
+    syslog->println((liveData->settings.mqttUseTls == 1) ? "ON" : "OFF");
+    saveSettings();
+    disconnectMqtt(false);
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttPort"))
+  {
+    long port = value.toInt();
+    if (port < 0)
+      port = 0;
+    if (port > 65535)
+      port = 65535;
+    liveData->settings.mqttPort = static_cast<uint16_t>(port);
+    syslog->print("MQTT port set to: ");
+    if (liveData->settings.mqttPort == 0)
+    {
+      syslog->println("0 (default)");
+    }
+    else
+    {
+      syslog->println(liveData->settings.mqttPort);
+    }
+    saveSettings();
+    disconnectMqtt(false);
+    return true;
+  }
   if (key.equalsIgnoreCase("mqttServer"))
   {
     value.toCharArray(liveData->settings.mqttServer, sizeof(liveData->settings.mqttServer));
+    syslog->print("MQTT server set to: ");
+    syslog->println(liveData->settings.mqttServer);
+    saveSettings();
+    disconnectMqtt(false);
     return true;
   }
   if (key.equalsIgnoreCase("mqttId"))
   {
     value.toCharArray(liveData->settings.mqttId, sizeof(liveData->settings.mqttId));
+    syslog->print("MQTT id set to: ");
+    syslog->println(liveData->settings.mqttId);
+    saveSettings();
+    disconnectMqtt(false);
     return true;
   }
-  if (key.equalsIgnoreCase("mqttUsername"))
+  if (key.equalsIgnoreCase("mqttUsername") || key.equalsIgnoreCase("mqttUser"))
   {
     value.toCharArray(liveData->settings.mqttUsername, sizeof(liveData->settings.mqttUsername));
+    syslog->print("MQTT username set to: ");
+    syslog->println(liveData->settings.mqttUsername);
+    saveSettings();
+    disconnectMqtt(false);
     return true;
   }
-  if (key.equalsIgnoreCase("mqttPassword"))
+  if (key.equalsIgnoreCase("mqttPassword") || key.equalsIgnoreCase("mqttPasswd"))
   {
     value.toCharArray(liveData->settings.mqttPassword, sizeof(liveData->settings.mqttPassword));
+    syslog->print("MQTT password set to: ");
+    syslog->println((strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
+    saveSettings();
+    disconnectMqtt(false);
     return true;
   }
-  if (key.equalsIgnoreCase("mqttPubTopic"))
+  if (key.equalsIgnoreCase("mqttPubTopic") || key.equalsIgnoreCase("mqttTopic"))
   {
     value.toCharArray(liveData->settings.mqttPubTopic, sizeof(liveData->settings.mqttPubTopic));
+    syslog->print("MQTT topic set to: ");
+    syslog->println(liveData->settings.mqttPubTopic);
+    saveSettings();
+    disconnectMqtt(false);
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttInterval") || key.equalsIgnoreCase("remoteUploadIntervalSec"))
+  {
+    long interval = value.toInt();
+    if (interval < 0)
+      interval = 0;
+    if (interval > 3600)
+      interval = 3600;
+    liveData->settings.remoteUploadIntervalSec = static_cast<uint16_t>(interval);
+    syslog->print("MQTT upload interval set to: ");
+    if (liveData->settings.remoteUploadIntervalSec == 0)
+    {
+      syslog->println("0 (auto 60s)");
+    }
+    else
+    {
+      syslog->printf("%u sec\n", liveData->settings.remoteUploadIntervalSec);
+    }
+    saveSettings();
     return true;
   }
 
@@ -1235,11 +1452,16 @@ void BoardInterface::showHelp()
   syslog->println("abrpApiToken=x ... set abrp api token for live data");
   syslog->println("remoteApiUrl=x ... set remote api url");
   syslog->println("remoteApiKey=x ... set remote api key");
-  syslog->println("mqttServer=x   ... set Mqtt server");
-  syslog->println("mqttId=x       ... set Mqtt id");
-  syslog->println("mqttUsername=x ... set Mqtt username");
-  syslog->println("mqttPassword=x ... set Mqtt password");
-  syslog->println("mqttPubTopic=x ... set Mqtt publish topic");
+  syslog->println("testMqtt       ... test MQTT connection and send heartbeat now");
+  syslog->println("mqtt           ... print all MQTT settings");
+  syslog->println("mqttEnabled[=0|1] ... get/set MQTT upload");
+  syslog->println("mqttSecure[=0|1]  ... get/set MQTT TLS/SSL encryption");
+  syslog->println("mqttServer[=x] ... get/set MQTT server");
+  syslog->println("mqttPort[=x]   ... get/set MQTT port (0 = default 1883/8883)");
+  syslog->println("mqttId[=x]     ... get/set MQTT id");
+  syslog->println("mqttUsername[=x] ... get/set MQTT username");
+  syslog->println("mqttPassword[=x] ... get/set MQTT password");
+  syslog->println("mqttPubTopic[=x] ... get/set MQTT publish topic");
   syslog->println("serviceUUID=x  ... set device uuid for obd2 ble adapter");
   syslog->println("charTxUUID=x   ... set tx uuid for obd2 ble adapter");
   syslog->println("charRxUUID=x   ... set rx uuid for obd2 ble adapter");

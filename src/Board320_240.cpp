@@ -125,7 +125,7 @@ namespace
   static char gAbrpFormBuffer[kAbrpFormBufferSize];
 
 #if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
-  bool publishMqttFloat(PubSubClient &client, const char *baseTopic, const char *suffix, float value)
+  bool publishMqttFloat(PubSubClient &client, const char *baseTopic, const char *suffix, float value, bool retain = false)
   {
     char topic[80];
     char tmpVal[20];
@@ -135,7 +135,31 @@ namespace
       return false;
     }
     dtostrf(value, 1, 2, tmpVal);
-    return client.publish(topic, tmpVal);
+    return client.publish(topic, tmpVal, retain);
+  }
+
+  bool publishMqttString(PubSubClient &client, const char *baseTopic, const char *suffix, const char *value, bool retain = false)
+  {
+    char topic[80];
+    int topicLen = snprintf(topic, sizeof(topic), "%s%s", baseTopic, suffix);
+    if (topicLen < 0 || topicLen >= static_cast<int>(sizeof(topic)))
+    {
+      return false;
+    }
+    return client.publish(topic, value, retain);
+  }
+
+  bool publishMqttInt(PubSubClient &client, const char *baseTopic, const char *suffix, int32_t value, bool retain = false)
+  {
+    char topic[80];
+    char tmpVal[16];
+    int topicLen = snprintf(topic, sizeof(topic), "%s%s", baseTopic, suffix);
+    if (topicLen < 0 || topicLen >= static_cast<int>(sizeof(topic)))
+    {
+      return false;
+    }
+    snprintf(tmpVal, sizeof(tmpVal), "%ld", static_cast<long>(value));
+    return client.publish(topic, tmpVal, retain);
   }
 #endif
 
@@ -3328,7 +3352,8 @@ bool Board320_240::wifiSetup()
  */
 void Board320_240::wifiFallback()
 {
-  WiFi.disconnect(true);
+  disconnectMqtt(false);
+  WiFi.disconnect(false, false);
 
   uint8_t currentIndex = liveData->params.wifiActiveIndex;
   uint8_t targetIndex = 0;
@@ -4828,10 +4853,10 @@ void Board320_240::updateNetAvailability(bool success)
   else
   {
     liveData->params.netAvailable = false;
-    liveData->params.netLastFailureTime = liveData->params.currentTime;
+    liveData->params.netLastFailureTime = (liveData->params.currentTime != 0) ? liveData->params.currentTime : 1;
     if (liveData->params.netFailureStartTime == 0)
     {
-      liveData->params.netFailureStartTime = liveData->params.currentTime;
+      liveData->params.netFailureStartTime = (liveData->params.currentTime != 0) ? liveData->params.currentTime : 1;
     }
     if (liveData->params.netFailureCount < 0xFFFFU)
     {
@@ -4839,6 +4864,157 @@ void Board320_240::updateNetAvailability(bool success)
     }
   }
 }
+
+#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+bool Board320_240::ensureMqttConnected()
+{
+  if (liveData->settings.mqttEnabled != 1)
+  {
+    return false;
+  }
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    return false;
+  }
+  if (strlen(liveData->settings.mqttServer) == 0 || strcmp(liveData->settings.mqttServer, "not_set") == 0)
+  {
+    return false;
+  }
+
+  // Choose transport
+  Client *transport = nullptr;
+  if (liveData->settings.mqttUseTls == 1)
+  {
+    if (mqttSecureClient == nullptr)
+    {
+      mqttSecureClient = new WiFiClientSecure();
+    }
+    mqttSecureClient->setInsecure();
+    mqttSecureClient->setTimeout(5000);
+    transport = mqttSecureClient;
+  }
+  else
+  {
+    if (mqttPlainClient == nullptr)
+    {
+      mqttPlainClient = new WiFiClient();
+    }
+    mqttPlainClient->setTimeout(5000);
+    transport = mqttPlainClient;
+  }
+
+  if (mqttClient == nullptr)
+  {
+    mqttClient = new PubSubClient(*transport);
+  }
+  else
+  {
+    mqttClient->setClient(*transport);
+  }
+
+  if (mqttClient->connected())
+  {
+    return true;
+  }
+
+  // Check reconnect backoff to avoid blocking main loop on repeated connection failures
+  if (lastMqttReconnectAttemptMs != 0 && (millis() - lastMqttReconnectAttemptMs) < kMqttReconnectBackoffMs)
+  {
+    return false;
+  }
+
+  lastMqttReconnectAttemptMs = millis();
+
+  const uint16_t mqttPort = (liveData->settings.mqttPort != 0)
+                                ? liveData->settings.mqttPort
+                                : ((liveData->settings.mqttUseTls == 1) ? 8883 : 1883);
+
+  syslog->infoNolf(DEBUG_NET, "Connecting to MQTT server: ");
+  syslog->infoNolf(DEBUG_NET, liveData->settings.mqttServer);
+  syslog->infoNolf(DEBUG_NET, ":");
+  syslog->infoNolf(DEBUG_NET, String(mqttPort));
+  syslog->info(DEBUG_NET, (liveData->settings.mqttUseTls == 1) ? " (TLS)" : " (plain)");
+
+  mqttClient->setServer(liveData->settings.mqttServer, mqttPort);
+  mqttClient->setSocketTimeout(5);
+  mqttClient->setBufferSize(512);
+
+  // Last Will and Testament (LWT) topic and message
+  char willTopic[96];
+  snprintf(willTopic, sizeof(willTopic), "%s/status", liveData->settings.mqttPubTopic);
+  const char *willMessage = "offline";
+  const uint8_t willQos = 0;
+  const bool willRetain = true;
+
+  bool connected = false;
+  if (strlen(liveData->settings.mqttUsername) > 0)
+  {
+    connected = mqttClient->connect(liveData->settings.mqttId,
+                                    liveData->settings.mqttUsername,
+                                    liveData->settings.mqttPassword,
+                                    willTopic, willQos, willRetain, willMessage);
+  }
+  else
+  {
+    connected = mqttClient->connect(liveData->settings.mqttId,
+                                    willTopic, willQos, willRetain, willMessage);
+  }
+
+  if (connected)
+  {
+    syslog->info(DEBUG_NET, "MQTT connected successfully");
+    publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
+    return true;
+  }
+  else
+  {
+    const char *stateDesc = "";
+    switch (mqttClient->state())
+    {
+    case -4: stateDesc = " (timeout)"; break;
+    case -3: stateDesc = " (connection lost)"; break;
+    case -2: stateDesc = " (connect failed / unreachable)"; break;
+    case -1: stateDesc = " (disconnected)"; break;
+    case 1:  stateDesc = " (bad protocol)"; break;
+    case 2:  stateDesc = " (bad client ID)"; break;
+    case 3:  stateDesc = " (server unavailable)"; break;
+    case 4:  stateDesc = " (bad credentials)"; break;
+    case 5:  stateDesc = " (unauthorized)"; break;
+    default: break;
+    }
+    syslog->infoNolf(DEBUG_NET, "MQTT connect failed, state: ");
+    syslog->infoNolf(DEBUG_NET, String(mqttClient->state()));
+    syslog->info(DEBUG_NET, stateDesc);
+    return false;
+  }
+}
+
+void Board320_240::disconnectMqtt(bool sendOfflineStatus)
+{
+  if (mqttClient != nullptr)
+  {
+    if (mqttClient->connected())
+    {
+      if (sendOfflineStatus && strlen(liveData->settings.mqttPubTopic) > 0)
+      {
+        publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "offline", true);
+      }
+      mqttClient->disconnect();
+    }
+  }
+  if (mqttSecureClient != nullptr)
+  {
+    mqttSecureClient->stop();
+  }
+  if (mqttPlainClient != nullptr)
+  {
+    mqttPlainClient->stop();
+  }
+}
+#else
+bool Board320_240::ensureMqttConnected() { return false; }
+void Board320_240::disconnectMqtt(bool sendOfflineStatus) {}
+#endif
 
 /**
  * Net loop, send data over net
@@ -4860,11 +5036,26 @@ void Board320_240::netLoop()
     liveData->params.netFailureStartTime = 0;
     liveData->params.netFailureCount = 0;
     dismissedNetFailureTime = 0;
+    disconnectMqtt(false);
   }
+#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+  else if (liveData->settings.mqttEnabled == 1)
+  {
+    if (mqttClient != nullptr && mqttClient->connected())
+    {
+      mqttClient->loop();
+    }
+  }
+#endif
 
   // Avoid stale "Net unavailable" state when no internet uploader is effectively active.
   const auto remoteApiConfigured = [this]() -> bool
   {
+    if (liveData->settings.mqttEnabled == 1)
+    {
+      const char *server = liveData->settings.mqttServer;
+      return server != nullptr && server[0] != '\0' && strcmp(server, "not_set") != 0;
+    }
     if (liveData->settings.remoteUploadIntervalSec == 0)
     {
       return false;
@@ -4926,6 +5117,7 @@ void Board320_240::netLoop()
 
   bool netBackoffActive = (!liveData->params.netAvailable &&
                            liveData->params.netLastFailureTime != 0 &&
+                           liveData->params.currentTime >= liveData->params.netLastFailureTime &&
                            (liveData->params.currentTime - liveData->params.netLastFailureTime) < kNetRetryIntervalSec);
   bool netReady = wifiReady && !netBackoffActive;
 
@@ -4957,12 +5149,19 @@ void Board320_240::netLoop()
     gpsTimeFallbackAllowed = false;
   }
 
-  // Upload to custom API
-  if (netReady && remoteApiConfigured &&
-      liveData->params.currentTime - liveData->params.lastRemoteApiSent > liveData->settings.remoteUploadIntervalSec)
+  // Upload to custom API or MQTT
+  uint16_t remoteInterval = liveData->settings.remoteUploadIntervalSec;
+  if (remoteInterval == 0 && liveData->settings.mqttEnabled == 1)
   {
+    remoteInterval = 60; // Default 60s for MQTT if API interval is set to 0/off
+  }
+  const uint32_t remoteIntervalMs = static_cast<uint32_t>(remoteInterval) * 1000U;
+  if (netReady && remoteApiConfigured && remoteIntervalMs > 0 &&
+      (lastRemoteSendAtMs == 0 || (millis() - lastRemoteSendAtMs) > remoteIntervalMs))
+  {
+    lastRemoteSendAtMs = millis();
     liveData->params.lastRemoteApiSent = liveData->params.currentTime;
-    syslog->info(DEBUG_NET, "Remote send tick");
+    syslog->info(DEBUG_NET, (liveData->settings.mqttEnabled == 1) ? "MQTT send tick" : "Remote send tick");
     int64_t startTime = esp_timer_get_time();
     netSendData(false);
     int64_t endTime = esp_timer_get_time();
@@ -5090,7 +5289,10 @@ bool Board320_240::netSendData(bool sendAbrp)
   const String contributeKey = ensureContributeKey();
   const String hardwareDeviceId = normalizeDeviceIdForApi(getHardwareDeviceId());
 
-  if (liveData->params.socPerc < 0)
+  // For ABRP and custom HTTP POST API, valid car data (socPerc >= 0) is mandatory.
+  // For MQTT, we still allow sending heartbeat, device status, and GPS even if car data is not yet available.
+  const bool isMqtt = (!sendAbrp && liveData->settings.mqttEnabled == 1);
+  if (!isMqtt && liveData->params.socPerc < 0)
   {
     syslog->info(sendAbrp ? DEBUG_ABRP : DEBUG_NET, "No valid data, skipping data send");
     return false;
@@ -5099,7 +5301,7 @@ bool Board320_240::netSendData(bool sendAbrp)
   // WIFI
   if (liveData->settings.remoteUploadModuleType == 1)
   {
-    syslog->info(DEBUG_NET, "Sending data to API - via WIFI");
+    syslog->info(DEBUG_NET, (liveData->settings.mqttEnabled == 1) ? "Sending data via MQTT - via WIFI" : "Sending data to API - via WIFI");
   }
   else
   {
@@ -5116,16 +5318,30 @@ bool Board320_240::netSendData(bool sendAbrp)
     return false;
   }
 
-  syslog->info(DEBUG_NET, "Start HTTP POST...");
-
-  if (!sendAbrp && liveData->settings.remoteUploadIntervalSec != 0)
+  if (!sendAbrp && (liveData->settings.remoteUploadIntervalSec != 0 || liveData->settings.mqttEnabled == 1))
   {
-    if (strlen(liveData->settings.remoteApiUrl) == 0 ||
-        strcmp(liveData->settings.remoteApiUrl, "not_set") == 0 ||
-        strstr(liveData->settings.remoteApiUrl, "http") == nullptr)
+    if (liveData->settings.mqttEnabled != 1)
     {
-      syslog->info(DEBUG_NET, "Remote API URL not set, skipping send");
-      return false;
+      syslog->info(DEBUG_NET, "Start HTTP POST...");
+    }
+    if (liveData->settings.mqttEnabled == 1)
+    {
+      if (strlen(liveData->settings.mqttServer) == 0 ||
+          strcmp(liveData->settings.mqttServer, "not_set") == 0)
+      {
+        syslog->info(DEBUG_NET, "MQTT server not set, skipping send");
+        return false;
+      }
+    }
+    else
+    {
+      if (strlen(liveData->settings.remoteApiUrl) == 0 ||
+          strcmp(liveData->settings.remoteApiUrl, "not_set") == 0 ||
+          strstr(liveData->settings.remoteApiUrl, "http") == nullptr)
+      {
+        syslog->info(DEBUG_NET, "Remote API URL not set, skipping send");
+        return false;
+      }
     }
 
     StaticJsonDocument<768> jsonData;
@@ -5176,55 +5392,74 @@ bool Board320_240::netSendData(bool sendAbrp)
     }
     serializeJson(jsonData, payload, sizeof(payload));
 
-    syslog->infoNolf(DEBUG_NET, "Sending payload: ");
-    syslog->info(DEBUG_NET, payload);
+    if (liveData->settings.mqttEnabled != 1)
+    {
+      syslog->infoNolf(DEBUG_NET, "Sending payload: ");
+      syslog->info(DEBUG_NET, payload);
 
-    syslog->infoNolf(DEBUG_NET, "Remote API server: ");
-    syslog->info(DEBUG_NET, liveData->settings.remoteApiUrl);
+      syslog->infoNolf(DEBUG_NET, "Remote API server: ");
+      syslog->info(DEBUG_NET, liveData->settings.remoteApiUrl);
+    }
 
     // WIFI remote upload
     rc = 0;
     if (liveData->settings.remoteUploadModuleType == REMOTE_UPLOAD_WIFI && liveData->settings.wifiEnabled == 1)
     {
-      // MQTT
-      WiFiClient wClient;
       if (liveData->settings.mqttEnabled == 1)
       {
-        PubSubClient client(wClient);
-        client.setServer(liveData->settings.mqttServer, 1883);
-        if (client.connect(liveData->settings.mqttId, liveData->settings.mqttUsername, liveData->settings.mqttPassword))
+#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+        if (ensureMqttConnected())
         {
           bool published = true;
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/socPerc", liveData->params.socPerc);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/chargingOn", liveData->params.chargingOn);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/batPowerKw", liveData->params.batPowerKw);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/batPowerAmp", liveData->params.batPowerAmp);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/batVoltage", liveData->params.batVoltage);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/auxVoltage", liveData->params.auxVoltage);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/batMinC", liveData->params.batMinC);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/batMaxC", liveData->params.batMaxC);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/extTemp", liveData->params.outdoorTemperature);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/speedKmh", liveData->params.speedKmh);
-          published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/odoKm", liveData->params.odoKm);
+          // Device & connection heartbeat (always sent when connected to MQTT broker)
+          published &= publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
+          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/uptimeSec", millis() / 1000);
+          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifiRssi", WiFi.RSSI());
+          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/carConnected", (liveData->params.socPerc >= 0) ? 1 : 0);
+
+          // Car telemetry (only when car CAN/BLE is communicating and socPerc >= 0)
+          if (liveData->params.socPerc >= 0)
+          {
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/socPerc", liveData->params.socPerc);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/chargingOn", liveData->params.chargingOn);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batPowerKw", liveData->params.batPowerKw);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batPowerAmp", liveData->params.batPowerAmp);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batVoltage", liveData->params.batVoltage);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/auxVoltage", liveData->params.auxVoltage);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batMinC", liveData->params.batMinC);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batMaxC", liveData->params.batMaxC);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/extTemp", liveData->params.outdoorTemperature);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/speedKmh", liveData->params.speedKmh);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/odoKm", liveData->params.odoKm);
+          }
+
           // Send GPS data via GPRS (if enabled && valid)
           if (isGpsFixUsable(liveData))
           {
-            published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/gpsLat", liveData->params.gpsLat);
-            published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/gpsLon", liveData->params.gpsLon);
-            published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/gpsSpeed", liveData->params.speedKmhGPS);
-            published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/gpsAlt", liveData->params.gpsAlt);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsLat", liveData->params.gpsLat);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsLon", liveData->params.gpsLon);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsSpeed", liveData->params.speedKmhGPS);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsAlt", liveData->params.gpsAlt);
 
             if (liveData->params.gpsHeadingDeg >= 0)
             {
-              published &= publishMqttFloat(client, liveData->settings.mqttPubTopic, "/gpsHeading", liveData->params.gpsHeadingDeg);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsHeading", liveData->params.gpsHeadingDeg);
             }
           }
           rc = published ? 200 : -1;
         }
+        else
+        {
+          rc = -1;
+        }
+#else
+        rc = -1;
+#endif
       }
       else
       {
         // Standard http post
+        WiFiClient wClient;
         HTTPClient http;
 
         http.begin(wClient, liveData->settings.remoteApiUrl);
@@ -5238,14 +5473,14 @@ bool Board320_240::netSendData(bool sendAbrp)
 
     if (rc == 200)
     {
-      syslog->info(DEBUG_NET, "HTTP POST send successful");
+      syslog->info(DEBUG_NET, (liveData->settings.mqttEnabled == 1) ? "MQTT send successful" : "HTTP POST send successful");
       liveData->params.lastSuccessNetSendTime = liveData->params.currentTime;
       updateNetAvailability(true);
     }
     else
     {
       // Failed...
-      syslog->infoNolf(DEBUG_NET, "HTTP POST error: ");
+      syslog->infoNolf(DEBUG_NET, (liveData->settings.mqttEnabled == 1) ? "MQTT send error: " : "HTTP POST error: ");
       syslog->info(DEBUG_NET, rc);
       updateNetAvailability(false);
     }

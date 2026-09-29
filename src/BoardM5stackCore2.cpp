@@ -621,6 +621,7 @@ void BoardM5stackCore2::eventDisplay(Event &e)
  */
 void BoardM5stackCore2::enterSleepMode(int secs)
 {
+  disconnectMqtt(true);
   if (secs > 0)
   {
     syslog->println("Going to sleep for " + String(secs) + " seconds!");

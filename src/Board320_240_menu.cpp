@@ -293,8 +293,22 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
   case MENU_REMOTE_UPLOAD_MQTT_ENABLED:
     suffix = (liveData->settings.mqttEnabled == 0) ? "[off]" : "[on]";
     break;
+  case MENU_REMOTE_UPLOAD_MQTT_SECURE:
+    suffix = (liveData->settings.mqttUseTls == 0) ? "[off]" : "[on]";
+    break;
   case MENU_REMOTE_UPLOAD_MQTT_SERVER:
     sprintf(tmpStr1, "%s", liveData->settings.mqttServer);
+    suffix = tmpStr1;
+    break;
+  case MENU_REMOTE_UPLOAD_MQTT_PORT:
+    if (liveData->settings.mqttPort == 0)
+    {
+      sprintf(tmpStr1, "%s", (liveData->settings.mqttUseTls == 1) ? "8883 (def)" : "1883 (def)");
+    }
+    else
+    {
+      sprintf(tmpStr1, "%u", liveData->settings.mqttPort);
+    }
     suffix = tmpStr1;
     break;
   case MENU_REMOTE_UPLOAD_MQTT_ID:
@@ -1420,6 +1434,15 @@ void Board320_240::menuItemClick()
     break;
     case MENU_REMOTE_UPLOAD_MQTT_ENABLED:
       liveData->settings.mqttEnabled = (liveData->settings.mqttEnabled == 1) ? 0 : 1;
+      saveSettings();
+      disconnectMqtt(false);
+      showMenu();
+      return;
+      break;
+    case MENU_REMOTE_UPLOAD_MQTT_SECURE:
+      liveData->settings.mqttUseTls = (liveData->settings.mqttUseTls == 1) ? 0 : 1;
+      saveSettings();
+      disconnectMqtt(false);
       showMenu();
       return;
       break;
@@ -1430,6 +1453,26 @@ void Board320_240::menuItemClick()
       {
         value.toCharArray(liveData->settings.mqttServer, sizeof(liveData->settings.mqttServer));
         saveSettings();
+        disconnectMqtt(false);
+      }
+      showMenu();
+      return;
+    }
+    break;
+    case MENU_REMOTE_UPLOAD_MQTT_PORT:
+    {
+      String value = (liveData->settings.mqttPort == 0) ? "" : String(liveData->settings.mqttPort);
+      if (promptKeyboard("MQTT port (0=def)", value, false, 5))
+      {
+        value.trim();
+        long parsedPort = value.toInt();
+        if (parsedPort < 0)
+          parsedPort = 0;
+        if (parsedPort > 65535)
+          parsedPort = 65535;
+        liveData->settings.mqttPort = static_cast<uint16_t>(parsedPort);
+        saveSettings();
+        disconnectMqtt(false);
       }
       showMenu();
       return;
@@ -1442,6 +1485,7 @@ void Board320_240::menuItemClick()
       {
         value.toCharArray(liveData->settings.mqttId, sizeof(liveData->settings.mqttId));
         saveSettings();
+        disconnectMqtt(false);
       }
       showMenu();
       return;
@@ -1454,6 +1498,7 @@ void Board320_240::menuItemClick()
       {
         value.toCharArray(liveData->settings.mqttUsername, sizeof(liveData->settings.mqttUsername));
         saveSettings();
+        disconnectMqtt(false);
       }
       showMenu();
       return;
@@ -1466,6 +1511,7 @@ void Board320_240::menuItemClick()
       {
         value.toCharArray(liveData->settings.mqttPassword, sizeof(liveData->settings.mqttPassword));
         saveSettings();
+        disconnectMqtt(false);
       }
       showMenu();
       return;
@@ -1478,6 +1524,7 @@ void Board320_240::menuItemClick()
       {
         value.toCharArray(liveData->settings.mqttPubTopic, sizeof(liveData->settings.mqttPubTopic));
         saveSettings();
+        disconnectMqtt(false);
       }
       showMenu();
       return;

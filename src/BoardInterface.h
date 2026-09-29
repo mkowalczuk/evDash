@@ -44,6 +44,8 @@ public:
   virtual void setTime(String timestamp);
   virtual void setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds) = 0;
   virtual void ntpSync() = 0;
+  virtual bool netSendData(bool sendAbrp) { return false; }
+  virtual void disconnectMqtt(bool sendOfflineStatus = false) {}
   // Graphics & GUI
   virtual void displayMessage(const char *row1, const char *row2) = 0;
   virtual void displayMessage(const char *row1, const char *row2, const char *row3) { displayMessage(row1, row2); }
