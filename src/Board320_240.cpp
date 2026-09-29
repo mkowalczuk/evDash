@@ -815,7 +815,7 @@ void Board320_240::afterSetup()
   }
 
   // Init GPS
-  if (liveData->settings.gpsHwSerialPort <= 2)
+  if (liveData->settings.gpsModuleType != GPS_MODULE_TYPE_NONE && liveData->settings.gpsHwSerialPort <= 2)
   {
     showBootProgress("GPS initialization...", "Starting GPS serial", TFT_SKYBLUE);
     initGPS();
