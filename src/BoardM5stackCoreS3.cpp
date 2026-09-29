@@ -420,6 +420,7 @@ bool BoardM5stackCoreS3::getTouch(int16_t &x, int16_t &y)
  */
 void BoardM5stackCoreS3::enterSleepMode(int secs)
 {
+  disconnectMqtt(true);
   if (secs > 0)
   {
     syslog->println("Going to sleep for " + String(secs) + " seconds!");

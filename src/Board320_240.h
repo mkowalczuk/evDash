@@ -28,6 +28,9 @@
 #endif // BOARD_M5STACK_CORES3
 
 class WebServer;
+class PubSubClient;
+class WiFiClient;
+class WiFiClientSecure;
 
 class Board320_240 : public BoardInterface
 {
@@ -92,8 +95,15 @@ protected:
   time_t dismissedNetFailureTime = 0;
   bool lastChargingOn = false;
   uint32_t lastNetSendDurationMs = 0;
+  uint32_t lastRemoteSendAtMs = 0;
   uint32_t lastAbrpSendAtMs = 0;
   uint32_t lastTraccarSendAtMs = 0;
+  WiFiClient *mqttPlainClient = nullptr;
+  WiFiClientSecure *mqttSecureClient = nullptr;
+  PubSubClient *mqttClient = nullptr;
+  uint32_t lastMqttReconnectAttemptMs = 0;
+  static constexpr uint32_t kMqttReconnectBackoffMs = 15000;
+  bool ensureMqttConnected();
   uint32_t wifiTransferredBytes = 0;
   uint32_t wifiTransferLastActivityMs = 0;
   uint32_t lastFirmwareVersionCheckMs = 0;
@@ -241,7 +251,8 @@ public:
   // Notwork
   bool wifiSetup();
   void netLoop();
-  bool netSendData(bool sendAbrp);
+  bool netSendData(bool sendAbrp) override;
+  void disconnectMqtt(bool sendOfflineStatus = false) override;
   bool netContributeData();
   bool buildContributePayloadV2(String &outJson, bool useReadableTsForSd = false) override;
   void wifiFallback();

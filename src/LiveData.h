@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 29
+#define SETTINGS_VERSION_CURRENT 30
 
 // BLE MAC address connection types
 #define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
@@ -467,6 +467,9 @@ typedef struct
   uint8_t sdcardLogRetention;      // Preserve last X logs: 1, 5, 10, 20, 50, 100, 0 (unlimited)
   // == settings version 29
   uint8_t bleAddressType;          // 0 - Random first (fallback Public), 1 - Public first (fallback Random)
+  // == settings version 30
+  uint8_t mqttUseTls;              // 0 - plain MQTT, 1 - secure MQTT (TLS)
+  uint16_t mqttPort;               // 0 = default port (1883 plain / 8883 TLS)
   //
 } SETTINGS_STRUC;
 
