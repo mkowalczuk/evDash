@@ -727,21 +727,23 @@ void BoardM5stackCore2::ntpSync()
   const char *ntpServer3 = "129.6.15.28"; // NIST, avoids DNS dependency
   configTime(liveData->settings.timezone * 3600, liveData->settings.daylightSaving * 3600,
              ntpServer1, ntpServer2, ntpServer3);
+}
 
-  // Single short poll only — netLoop() re-invokes ntpSync() every 5 s within a 60 s
-  // window, so a blocking 10 s wait here is redundant and can trip the task watchdog
-  // when NTP is unreachable.
-  struct tm tmInfo = {};
-  const bool timeOk = getLocalTime(&tmInfo, 250);
-
-  if (timeOk)
+void BoardM5stackCore2::syncRtcFromSystemTime()
+{
+  struct tm now;
+  if (getLocalTime(&now, 0))
   {
-    liveData->params.ntpTimeSet = true;
-    showTime();
-  }
-  else
-  {
-    liveData->params.ntpTimeSet = false;
+    RTC_TimeTypeDef RTCtime;
+    RTC_DateTypeDef RTCdate;
+    RTCdate.Year = now.tm_year + 1900;
+    RTCdate.Month = now.tm_mon + 1;
+    RTCdate.Date = now.tm_mday;
+    RTCtime.Hours = now.tm_hour;
+    RTCtime.Minutes = now.tm_min;
+    RTCtime.Seconds = now.tm_sec;
+    M5.Rtc.SetTime(&RTCtime);
+    M5.Rtc.SetDate(&RTCdate);
   }
 }
 
