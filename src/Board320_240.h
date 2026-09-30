@@ -104,6 +104,10 @@ protected:
   uint32_t lastMqttReconnectAttemptMs = 0;
   static constexpr uint32_t kMqttReconnectBackoffMs = 15000;
   bool ensureMqttConnected();
+  void publishHomeAssistantDiscovery();
+  void publishHaSensor(const char *component, const char *objectId, const char *name,
+                       const char *deviceClass, const char *unit, const char *stateClass,
+                       const char *entityCategory = nullptr, const char *payloadOn = nullptr, const char *payloadOff = nullptr);
   uint32_t wifiTransferredBytes = 0;
   uint32_t wifiTransferLastActivityMs = 0;
   uint32_t lastFirmwareVersionCheckMs = 0;
