@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 30
+#define SETTINGS_VERSION_CURRENT 32
 
 // BLE MAC address connection types
 #define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
@@ -469,6 +469,11 @@ typedef struct
   // == settings version 30
   uint8_t mqttUseTls;              // 0 - plain MQTT, 1 - secure MQTT (TLS)
   uint16_t mqttPort;               // 0 = default port (1883 plain / 8883 TLS)
+  // == settings version 31
+  uint8_t mqttHomeAssistant;       // 0 - disabled (default), 1 - send Home Assistant autodiscovery
+  // == settings version 32
+  char haName[32];                 // HA device name (fallback to mqttId)
+  char haModel[32];                // HA device model name (fallback to mqttPubTopic)
   //
 } SETTINGS_STRUC;
 

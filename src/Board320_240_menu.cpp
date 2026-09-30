@@ -327,6 +327,9 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     sprintf(tmpStr1, "%s", liveData->settings.mqttPubTopic);
     suffix = tmpStr1;
     break;
+  case MENU_REMOTE_UPLOAD_MQTT_HA:
+    suffix = (liveData->settings.mqttHomeAssistant == 0) ? "[off]" : "[on]";
+    break;
   case MENU_REMOTE_UPLOAD_CONTRIBUTE_DATA_TO_EVDASH_DEV_TEAM:
     suffix = (liveData->settings.contributeData == 0) ? "[off]" : "[on]";
     break;
@@ -1530,6 +1533,19 @@ void Board320_240::menuItemClick()
       return;
     }
     break;
+    case MENU_REMOTE_UPLOAD_MQTT_HA:
+      liveData->settings.mqttHomeAssistant = (liveData->settings.mqttHomeAssistant == 1) ? 0 : 1;
+      saveSettings();
+      if (liveData->settings.mqttHomeAssistant == 1)
+      {
+        if (liveData->settings.mqttEnabled == 1)
+        {
+          publishHomeAssistantDiscovery();
+        }
+      }
+      showMenu();
+      return;
+      break;
     case MENU_REMOTE_UPLOAD_CONTRIBUTE_DATA_TO_EVDASH_DEV_TEAM:
       liveData->settings.contributeData = (liveData->settings.contributeData == 1) ? 0 : 1;
       if (liveData->settings.contributeData == 0)

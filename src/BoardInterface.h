@@ -46,7 +46,9 @@ public:
   virtual void ntpSync() = 0;
   virtual void syncRtcFromSystemTime() {}
   virtual bool netSendData(bool sendAbrp) { return false; }
+  virtual bool ensureMqttConnected() { return false; }
   virtual void disconnectMqtt(bool sendOfflineStatus = false) {}
+  virtual void publishHomeAssistantDiscovery() {}
   // Graphics & GUI
   virtual void displayMessage(const char *row1, const char *row2) = 0;
   virtual void displayMessage(const char *row1, const char *row2, const char *row3) { displayMessage(row1, row2); }

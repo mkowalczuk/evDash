@@ -294,9 +294,14 @@ void BoardInterface::loadSettings()
   // v29
   liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
   // v30
-  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
   liveData->settings.mqttUseTls = 0;
   liveData->settings.mqttPort = 0;
+  // v31
+  liveData->settings.mqttHomeAssistant = 0;
+  // v32
+  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
+  liveData->settings.haName[0] = '\0';
+  liveData->settings.haModel[0] = '\0';
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -526,9 +531,20 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 29)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 30;
         liveData->tmpSettings.mqttUseTls = 0;
         liveData->tmpSettings.mqttPort = 0;
+      }
+      if (liveData->tmpSettings.settingsVersion == 30)
+      {
+        liveData->tmpSettings.settingsVersion = 31;
+        liveData->tmpSettings.mqttHomeAssistant = 0;
+      }
+      if (liveData->tmpSettings.settingsVersion == 31)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.haName[0] = '\0';
+        liveData->tmpSettings.haModel[0] = '\0';
       }
 
       // Save upgraded structure
@@ -568,6 +584,8 @@ void BoardInterface::loadSettings()
   EVDASH_TERMINATE_FIELD(mqttUsername);
   EVDASH_TERMINATE_FIELD(mqttPassword);
   EVDASH_TERMINATE_FIELD(mqttPubTopic);
+  EVDASH_TERMINATE_FIELD(haName);
+  EVDASH_TERMINATE_FIELD(haModel);
   EVDASH_TERMINATE_FIELD(traccarServerHost);
   EVDASH_TERMINATE_FIELD(relayToken);
   EVDASH_TERMINATE_FIELD(relayMobileId);
@@ -821,9 +839,24 @@ bool BoardInterface::customConsoleCommand(String cmd)
     syslog->printf("  user:     %s\n", liveData->settings.mqttUsername);
     syslog->printf("  passwd:   %s\n", (strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
     syslog->printf("  topic:    %s\n", liveData->settings.mqttPubTopic);
+    syslog->printf("  haName:   %s\n", (strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : "(unset, uses mqttId)");
+    syslog->printf("  haModel:  %s\n", (strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel : "(unset, uses mqttTopic)");
     syslog->printf("  interval: %u sec%s\n",
                    liveData->settings.remoteUploadIntervalSec,
                    (liveData->settings.remoteUploadIntervalSec == 0) ? " (auto 60s)" : "");
+    syslog->printf("  homeassistant: %s\n", (liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("haName"))
+  {
+    syslog->print("HA Name: ");
+    syslog->println((strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : "(unset, uses mqttId)");
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("haModel"))
+  {
+    syslog->print("HA Model: ");
+    syslog->println((strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel : "(unset, uses mqttTopic)");
     return true;
   }
   if (cmd.equalsIgnoreCase("mqttInterval"))
@@ -837,6 +870,12 @@ bool BoardInterface::customConsoleCommand(String cmd)
     {
       syslog->printf("%u sec\n", liveData->settings.remoteUploadIntervalSec);
     }
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("mqttHa") || cmd.equalsIgnoreCase("mqttHomeAssistant"))
+  {
+    syslog->print("MQTT Home Assistant discovery: ");
+    syslog->println((liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
     return true;
   }
   if (cmd.equalsIgnoreCase("mqttEnabled"))
@@ -1029,6 +1068,21 @@ bool BoardInterface::customConsoleCommand(String cmd)
     disconnectMqtt(false);
     return true;
   }
+  if (key.equalsIgnoreCase("mqttHa") || key.equalsIgnoreCase("mqttHomeAssistant"))
+  {
+    liveData->settings.mqttHomeAssistant = (value == "1" || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("on")) ? 1 : 0;
+    syslog->print("MQTT Home Assistant discovery set to: ");
+    syslog->println((liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
+    saveSettings();
+    if (liveData->settings.mqttHomeAssistant == 1)
+    {
+      if (liveData->settings.mqttEnabled == 1)
+      {
+        publishHomeAssistantDiscovery();
+      }
+    }
+    return true;
+  }
   if (key.equalsIgnoreCase("mqttSecure") || key.equalsIgnoreCase("mqttTls") || key.equalsIgnoreCase("mqttUseTls"))
   {
     liveData->settings.mqttUseTls = (value == "1" || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("on")) ? 1 : 0;
@@ -1102,6 +1156,30 @@ bool BoardInterface::customConsoleCommand(String cmd)
     syslog->println(liveData->settings.mqttPubTopic);
     saveSettings();
     disconnectMqtt(false);
+    return true;
+  }
+  if (key.equalsIgnoreCase("haName"))
+  {
+    value.toCharArray(liveData->settings.haName, sizeof(liveData->settings.haName));
+    syslog->print("HA Name set to: ");
+    syslog->println((strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : "(unset, uses mqttId)");
+    saveSettings();
+    if (liveData->settings.mqttHomeAssistant == 1 && liveData->settings.mqttEnabled == 1)
+    {
+      publishHomeAssistantDiscovery();
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("haModel"))
+  {
+    value.toCharArray(liveData->settings.haModel, sizeof(liveData->settings.haModel));
+    syslog->print("HA Model set to: ");
+    syslog->println((strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel : "(unset, uses mqttTopic)");
+    saveSettings();
+    if (liveData->settings.mqttHomeAssistant == 1 && liveData->settings.mqttEnabled == 1)
+    {
+      publishHomeAssistantDiscovery();
+    }
     return true;
   }
   if (key.equalsIgnoreCase("mqttInterval") || key.equalsIgnoreCase("remoteUploadIntervalSec"))
@@ -1462,6 +1540,7 @@ void BoardInterface::showHelp()
   syslog->println("mqttUsername[=x] ... get/set MQTT username");
   syslog->println("mqttPassword[=x] ... get/set MQTT password");
   syslog->println("mqttPubTopic[=x] ... get/set MQTT publish topic");
+  syslog->println("mqttHa[=0|1]      ... get/set Home Assistant MQTT autodiscovery");
   syslog->println("serviceUUID=x  ... set device uuid for obd2 ble adapter");
   syslog->println("charTxUUID=x   ... set tx uuid for obd2 ble adapter");
   syslog->println("charRxUUID=x   ... set rx uuid for obd2 ble adapter");

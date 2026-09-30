@@ -133,16 +133,16 @@ namespace
   static char gAbrpFormBuffer[kAbrpFormBufferSize];
 
 #if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
-  bool publishMqttFloat(PubSubClient &client, const char *baseTopic, const char *suffix, float value, bool retain = false)
+  bool publishMqttFloat(PubSubClient &client, const char *baseTopic, const char *suffix, float value, uint8_t precision = 2, bool retain = false)
   {
     char topic[80];
-    char tmpVal[20];
+    char tmpVal[24];
     int topicLen = snprintf(topic, sizeof(topic), "%s%s", baseTopic, suffix);
     if (topicLen < 0 || topicLen >= static_cast<int>(sizeof(topic)))
     {
       return false;
     }
-    dtostrf(value, 1, 2, tmpVal);
+    dtostrf(value, 1, precision, tmpVal);
     return client.publish(topic, tmpVal, retain);
   }
 
@@ -4965,6 +4965,10 @@ bool Board320_240::ensureMqttConnected()
   {
     syslog->info(DEBUG_NET, "MQTT connected successfully");
     publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
+    if (liveData->settings.mqttHomeAssistant == 1)
+    {
+      publishHomeAssistantDiscovery();
+    }
     return true;
   }
   else
@@ -5012,9 +5016,192 @@ void Board320_240::disconnectMqtt(bool sendOfflineStatus)
     mqttPlainClient->stop();
   }
 }
+
+void Board320_240::publishHaSensor(const char *component, const char *objectId, const char *name,
+                                   const char *deviceClass, const char *unit, const char *stateClass,
+                                   const char *entityCategory, const char *payloadOn, const char *payloadOff)
+{
+  if (mqttClient == nullptr || !mqttClient->connected())
+  {
+    return;
+  }
+
+  const char *rawTopic = liveData->settings.mqttPubTopic;
+  const char *baseTopic = (strlen(rawTopic) > 0) ? rawTopic : "evdash";
+  const char *rawId = (strlen(liveData->settings.mqttId) > 0) ? liveData->settings.mqttId :
+                      ((strlen(rawTopic) > 0) ? rawTopic : "evdash");
+  const char *devName = (strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : rawId;
+
+  char devId[64];
+  size_t idx = 0;
+  for (; rawId[idx] != '\0' && idx < sizeof(devId) - 1; idx++)
+  {
+    devId[idx] = (rawId[idx] == ' ' || rawId[idx] == '/') ? '_' : rawId[idx];
+  }
+  devId[idx] = '\0';
+
+  char configTopic[128];
+  snprintf(configTopic, sizeof(configTopic), "homeassistant/%s/%s/%s/config", component, devId, objectId);
+
+  StaticJsonDocument<512> doc;
+  doc["name"] = name;
+  char uniqueId[96];
+  snprintf(uniqueId, sizeof(uniqueId), "%s_%s", devId, objectId);
+  doc["uniq_id"] = uniqueId;
+  doc["object_id"] = uniqueId;
+  char defaultEntityId[128];
+  snprintf(defaultEntityId, sizeof(defaultEntityId), "%s.%s_%s", component, devId, objectId);
+  doc["default_entity_id"] = defaultEntityId;
+  doc["has_entity_name"] = true;
+
+  char stateTopic[96];
+  snprintf(stateTopic, sizeof(stateTopic), "%s/%s", baseTopic, objectId);
+  doc["stat_t"] = stateTopic;
+
+  if (deviceClass != nullptr && strlen(deviceClass) > 0)
+  {
+    doc["dev_cla"] = deviceClass;
+  }
+  if (unit != nullptr && strlen(unit) > 0)
+  {
+    doc["unit_of_meas"] = unit;
+  }
+  if (stateClass != nullptr && strlen(stateClass) > 0)
+  {
+    doc["stat_cla"] = stateClass;
+  }
+  if (entityCategory != nullptr && strlen(entityCategory) > 0)
+  {
+    doc["ent_cat"] = entityCategory;
+  }
+  if (payloadOn != nullptr)
+  {
+    doc["pl_on"] = payloadOn;
+  }
+  if (payloadOff != nullptr)
+  {
+    doc["pl_off"] = payloadOff;
+  }
+
+  char availTopic[96];
+  snprintf(availTopic, sizeof(availTopic), "%s/status", baseTopic);
+  doc["avty_t"] = availTopic;
+  doc["pl_avail"] = "online";
+  doc["pl_not_avail"] = "offline";
+
+  JsonObject dev = doc.createNestedObject("dev");
+  JsonArray ids = dev.createNestedArray("ids");
+  ids.add(devId);
+  dev["name"] = devName;
+
+  const char *rawModel = (strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel :
+                         ((strlen(rawTopic) > 0) ? rawTopic :
+#if defined(BOARD_M5STACK_CORES3)
+                          "CoreS3"
+#else
+                          "Core2"
+#endif
+                         );
+  dev["mdl"] = rawModel;
+  dev["mf"] = "evDash";
+
+  const char *swVer = (APP_VERSION[0] == 'v') ? (APP_VERSION + 1) : APP_VERSION;
+  dev["sw"] = swVer;
+
+  char payload[512];
+  size_t len = serializeJson(doc, payload, sizeof(payload));
+  if (len > 0 && len < sizeof(payload))
+  {
+    mqttClient->publish(configTopic, payload, true);
+  }
+}
+
+void Board320_240::publishHomeAssistantDiscovery()
+{
+  if (mqttClient == nullptr || !mqttClient->connected())
+  {
+    if (liveData->settings.mqttEnabled == 1)
+    {
+      ensureMqttConnected();
+    }
+    return;
+  }
+
+  syslog->info(DEBUG_NET, "Publishing Home Assistant MQTT discovery entities...");
+
+  // Battery
+  publishHaSensor("sensor", "soc", "Battery State of Charge", "battery", "%", "measurement");
+  publishHaSensor("sensor", "soc_kwh", "Battery SoC in kWh", "energy", "kWh", "measurement");
+  publishHaSensor("sensor", "soh", "Battery State of Health", "battery", "%", "measurement");
+  publishHaSensor("sensor", "bat_power", "Battery Power", "power", "kW", "measurement");
+  publishHaSensor("sensor", "bat_current", "Battery Current", "current", "A", "measurement");
+  publishHaSensor("sensor", "bat_voltage", "Battery Voltage", "voltage", "V", "measurement");
+  publishHaSensor("sensor", "bat_temp", "Battery Temperature", "temperature", "°C", "measurement");
+  publishHaSensor("sensor", "cell_temp_min", "Cell Temperature Min", "temperature", "°C", "measurement");
+  publishHaSensor("sensor", "cell_temp_max", "Cell Temperature Max", "temperature", "°C", "measurement");
+  publishHaSensor("sensor", "cell_voltage_min", "Cell Voltage Min", "voltage", "V", "measurement");
+  publishHaSensor("sensor", "cell_voltage_max", "Cell Voltage Max", "voltage", "V", "measurement");
+
+  // 12V Aux
+  publishHaSensor("sensor", "aux_voltage", "Aux 12V Battery Voltage", "voltage", "V", "measurement");
+  publishHaSensor("sensor", "aux_current", "Aux 12V Battery Current", "current", "A", "measurement");
+  publishHaSensor("sensor", "aux_soc", "Aux 12V State of Charge", "battery", "%", "measurement");
+
+  // Charging
+  publishHaSensor("binary_sensor", "charging_on", "Charging", "battery_charging", nullptr, nullptr, nullptr, "1", "0");
+  publishHaSensor("binary_sensor", "charger_ac_connected", "Charger AC Connected", "plug", nullptr, nullptr, nullptr, "1", "0");
+  publishHaSensor("binary_sensor", "charger_dc_connected", "Charger DC Fast Charging", "plug", nullptr, nullptr, nullptr, "1", "0");
+  publishHaSensor("sensor", "charger_power", "Station Power", "power", "kW", "measurement");
+  publishHaSensor("sensor", "charger_voltage", "Station Voltage", "voltage", "V", "measurement");
+  publishHaSensor("sensor", "charger_current", "Station Current", "current", "A", "measurement");
+  publishHaSensor("sensor", "charged_session_energy", "Charging Session Energy", "energy", "kWh", "measurement");
+  publishHaSensor("sensor", "cumulative_energy_charged", "Total Charged Energy", "energy", "kWh", "total_increasing");
+
+  // Driving & Drivetrain
+  publishHaSensor("binary_sensor", "ignition_on", "Ignition", "power", nullptr, nullptr, nullptr, "1", "0");
+  publishHaSensor("sensor", "speed", "Vehicle Speed", "speed", "km/h", "measurement");
+  publishHaSensor("sensor", "odometer", "Odometer", "distance", "km", "total_increasing");
+  publishHaSensor("sensor", "trip_distance", "Trip Distance", "distance", "km", "measurement");
+  publishHaSensor("sensor", "avg_speed", "Average Speed", "speed", "km/h", "measurement");
+  publishHaSensor("sensor", "consumption", "Energy Consumption", nullptr, "kWh/100km", "measurement");
+  publishHaSensor("sensor", "discharged_session_energy", "Trip Discharged Energy", "energy", "kWh", "measurement");
+  publishHaSensor("sensor", "cumulative_energy_discharged", "Total Discharged Energy", "energy", "kWh", "total_increasing");
+  publishHaSensor("sensor", "motor1_rpm", "Motor 1 RPM", nullptr, "rpm", "measurement");
+  publishHaSensor("sensor", "motor2_rpm", "Motor 2 RPM", nullptr, "rpm", "measurement");
+  publishHaSensor("sensor", "motor1_torque", "Motor 1 Torque", nullptr, "Nm", "measurement");
+  publishHaSensor("sensor", "motor2_torque", "Motor 2 Torque", nullptr, "Nm", "measurement");
+  publishHaSensor("sensor", "motor_temp", "Motor Temperature", "temperature", "°C", "measurement");
+  publishHaSensor("sensor", "inverter_temp", "Inverter Temperature", "temperature", "°C", "measurement");
+
+  // Tires
+  publishHaSensor("sensor", "tire_pressure_fl", "Tire Pressure Front Left", "pressure", "bar", "measurement");
+  publishHaSensor("sensor", "tire_pressure_fr", "Tire Pressure Front Right", "pressure", "bar", "measurement");
+  publishHaSensor("sensor", "tire_pressure_rl", "Tire Pressure Rear Left", "pressure", "bar", "measurement");
+  publishHaSensor("sensor", "tire_pressure_rr", "Tire Pressure Rear Right", "pressure", "bar", "measurement");
+
+  // Environment
+  publishHaSensor("sensor", "outdoor_temp", "Outdoor Temperature", "temperature", "°C", "measurement");
+
+  // GPS
+  publishHaSensor("sensor", "gps_lat", "GPS Latitude", nullptr, "°", nullptr);
+  publishHaSensor("sensor", "gps_lon", "GPS Longitude", nullptr, "°", nullptr);
+  publishHaSensor("sensor", "gps_speed", "GPS Speed", "speed", "km/h", "measurement");
+  publishHaSensor("sensor", "gps_alt", "GPS Altitude", "distance", "m", nullptr);
+  publishHaSensor("sensor", "gps_heading", "GPS Heading", nullptr, "°", "measurement");
+
+  // Diagnostics
+  publishHaSensor("sensor", "status", "Device Status", nullptr, nullptr, nullptr, "diagnostic");
+  publishHaSensor("binary_sensor", "car_connected", "Car Connected", "connectivity", nullptr, nullptr, "diagnostic", "1", "0");
+  publishHaSensor("sensor", "wifi_rssi", "WiFi Signal", "signal_strength", "dBm", "measurement", "diagnostic");
+  publishHaSensor("sensor", "uptime", "Uptime", "duration", "s", "measurement", "diagnostic");
+
+  syslog->info(DEBUG_NET, "Home Assistant MQTT discovery published (retained).");
+}
 #else
 bool Board320_240::ensureMqttConnected() { return false; }
 void Board320_240::disconnectMqtt(bool sendOfflineStatus) {}
+void Board320_240::publishHomeAssistantDiscovery() {}
+void Board320_240::publishHaSensor(const char *, const char *, const char *, const char *, const char *, const char *, const char *, const char *, const char *) {}
 #endif
 
 /**
@@ -5424,37 +5611,170 @@ bool Board320_240::netSendData(bool sendAbrp)
           bool published = true;
           // Device & connection heartbeat (always sent when connected to MQTT broker)
           published &= publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
-          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/uptimeSec", millis() / 1000);
-          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifiRssi", WiFi.RSSI());
-          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/carConnected", (liveData->params.socPerc >= 0) ? 1 : 0);
+          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/uptime", millis() / 1000);
+          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifi_rssi", WiFi.RSSI());
+          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/car_connected", (liveData->params.socPerc >= 0) ? 1 : 0);
 
           // Car telemetry (only when car CAN/BLE is communicating and socPerc >= 0)
           if (liveData->params.socPerc >= 0)
           {
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/socPerc", liveData->params.socPerc);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/chargingOn", liveData->params.chargingOn);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batPowerKw", liveData->params.batPowerKw);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batPowerAmp", liveData->params.batPowerAmp);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batVoltage", liveData->params.batVoltage);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/auxVoltage", liveData->params.auxVoltage);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batMinC", liveData->params.batMinC);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/batMaxC", liveData->params.batMaxC);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/extTemp", liveData->params.outdoorTemperature);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/speedKmh", liveData->params.speedKmh);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/odoKm", liveData->params.odoKm);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc", liveData->params.socPerc);
+            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charging_on", liveData->params.chargingOn ? 1 : 0);
+            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/ignition_on", liveData->params.ignitionOn ? 1 : 0);
+            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charger_ac_connected", liveData->params.chargerACconnected ? 1 : 0);
+            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charger_dc_connected", liveData->params.chargerDCconnected ? 1 : 0);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_power", liveData->params.batPowerKw);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_current", liveData->params.batPowerAmp);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_voltage", liveData->params.batVoltage);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/aux_voltage", liveData->params.auxVoltage);
+            if (liveData->params.batMinC > -90.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_temp_min", liveData->params.batMinC);
+            }
+            if (liveData->params.batMaxC > -90.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_temp_max", liveData->params.batMaxC);
+            }
+            float batTemp = (liveData->params.batTempC > -90.0f) ? liveData->params.batTempC :
+                            ((liveData->params.batMinC > -90.0f && liveData->params.batMaxC > -90.0f) ?
+                             (liveData->params.batMinC + liveData->params.batMaxC) / 2.0f : -100.0f);
+            if (batTemp > -90.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_temp", batTemp);
+            }
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/outdoor_temp", liveData->params.outdoorTemperature);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/speed", liveData->params.speedKmh);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/odometer", liveData->params.odoKm);
+
+            float socKwh = (liveData->params.batEnergyContent > 0) ? liveData->params.batEnergyContent :
+                           ((liveData->params.batteryTotalAvailableKWh > 0) ?
+                            (liveData->params.batteryTotalAvailableKWh * liveData->params.socPerc / 100.0f) : -1.0f);
+            if (socKwh >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc_kwh", socKwh, 1);
+            }
+            if (liveData->params.sohPerc >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soh", liveData->params.sohPerc, 1);
+            }
+            if (liveData->params.batCellMinV > 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_voltage_min", liveData->params.batCellMinV, 3);
+            }
+            if (liveData->params.batCellMaxV > 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_voltage_max", liveData->params.batCellMaxV, 3);
+            }
+            if (liveData->params.auxCurrentAmp > -900.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/aux_current", liveData->params.auxCurrentAmp, 2);
+            }
+            if (liveData->params.auxPerc >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/aux_soc", liveData->params.auxPerc, 0);
+            }
+
+            // Charging stats
+            if (liveData->params.chargerVoltage > 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charger_voltage", liveData->params.chargerVoltage, 1);
+            }
+            if (liveData->params.chargerCurrent > 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charger_current", liveData->params.chargerCurrent, 1);
+            }
+            if (liveData->params.chargerVoltage > 0 && liveData->params.chargerCurrent > 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charger_power", (liveData->params.chargerVoltage * liveData->params.chargerCurrent) / 1000.0f, 2);
+            }
+            if (liveData->params.cumulativeEnergyChargedKWh >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_charged", liveData->params.cumulativeEnergyChargedKWh, 1);
+              if (liveData->params.cumulativeEnergyChargedKWhStart >= 0 &&
+                  (liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart) >= 0)
+              {
+                published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charged_session_energy", liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart, 2);
+              }
+            }
+
+            // Driving & Drivetrain stats
+            if (liveData->params.motor1Rpm >= 0)
+            {
+              published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/motor1_rpm", round(liveData->params.motor1Rpm));
+            }
+            if (liveData->params.motor2Rpm >= 0)
+            {
+              published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/motor2_rpm", round(liveData->params.motor2Rpm));
+            }
+            if (liveData->params.motor1TorqueNm > -500.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/motor1_torque", liveData->params.motor1TorqueNm, 1);
+            }
+            if (liveData->params.motor2TorqueNm > -500.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/motor2_torque", liveData->params.motor2TorqueNm, 1);
+            }
+            if (liveData->params.motorTempC > -90.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/motor_temp", liveData->params.motorTempC, 1);
+            }
+            if (liveData->params.inverterTempC > -90.0f)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/inverter_temp", liveData->params.inverterTempC, 1);
+            }
+            if (liveData->params.batPowerKwh100 >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/consumption", liveData->params.batPowerKwh100, 2);
+            }
+            if (liveData->params.avgSpeedKmh >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/avg_speed", liveData->params.avgSpeedKmh, 1);
+            }
+            if (liveData->params.odoKm >= 0 && liveData->params.odoKmStart >= 0 &&
+                (liveData->params.odoKm - liveData->params.odoKmStart) >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/trip_distance", liveData->params.odoKm - liveData->params.odoKmStart, 1);
+            }
+            if (liveData->params.cumulativeEnergyDischargedKWh >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_discharged", liveData->params.cumulativeEnergyDischargedKWh, 1);
+              if (liveData->params.cumulativeEnergyDischargedKWhStart >= 0 &&
+                  (liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart) >= 0)
+              {
+                published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/discharged_session_energy", liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart, 2);
+              }
+            }
+
+            // Tires
+            if (liveData->params.tireFrontLeftPressureBar >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fl", liveData->params.tireFrontLeftPressureBar);
+            }
+            if (liveData->params.tireFrontRightPressureBar >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fr", liveData->params.tireFrontRightPressureBar);
+            }
+            if (liveData->params.tireRearLeftPressureBar >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rl", liveData->params.tireRearLeftPressureBar);
+            }
+            if (liveData->params.tireRearRightPressureBar >= 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rr", liveData->params.tireRearRightPressureBar);
+            }
           }
 
           // Send GPS data via GPRS (if enabled && valid)
           if (isGpsFixUsable(liveData))
           {
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsLat", liveData->params.gpsLat);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsLon", liveData->params.gpsLon);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsSpeed", liveData->params.speedKmhGPS);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsAlt", liveData->params.gpsAlt);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_lat", liveData->params.gpsLat, 5);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_lon", liveData->params.gpsLon, 5);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_speed", liveData->params.speedKmhGPS);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_alt", liveData->params.gpsAlt);
 
             if (liveData->params.gpsHeadingDeg >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gpsHeading", liveData->params.gpsHeadingDeg);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_heading", liveData->params.gpsHeadingDeg);
             }
           }
           rc = published ? 200 : -1;
