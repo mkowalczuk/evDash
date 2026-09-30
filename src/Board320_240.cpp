@@ -55,6 +55,7 @@ So in summary, it initializes the core display and hardware functionality, retri
 #include "CarModelUtils.h"
 #include "EvDashMobileRelay.h"
 #include "traccar.h"
+#include <esp_sntp.h>
 
 #if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
 #include <PubSubClient.h>
@@ -64,6 +65,13 @@ extern EvDashMobileRelay *mobileRelay;
 
 namespace
 {
+  volatile bool s_ntpSyncCompleted = false;
+
+  void sntpTimeSyncNotificationCallback(struct timeval *tv)
+  {
+    s_ntpSyncCompleted = true;
+  }
+
   constexpr uint32_t kNetRetryIntervalSec = 30;
   constexpr uint32_t kNtpPriorityWindowMs = 60000;
   constexpr uint32_t kNtpRetryIntervalMs = 5000;
@@ -704,6 +712,8 @@ void Board320_240::initBoard()
 
   // Init time library
   struct timeval tv;
+  tv.tv_sec = 0;
+  tv.tv_usec = 0;
 
 #if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
 #ifdef BOARD_M5STACK_CORE2
@@ -724,10 +734,6 @@ void Board320_240::initBoard()
     time_t t = mktime(&tm_tmp);
     tv.tv_sec = t;
   }
-  else
-  {
-    tv.tv_sec = 1589011873;
-  }
 #endif // BOARD_M5STACK_CORE2
 #ifdef BOARD_M5STACK_CORES3
   auto dt = CoreS3.Rtc.getDateTime();
@@ -744,16 +750,11 @@ void Board320_240::initBoard()
     time_t t = mktime(&tm_tmp);
     tv.tv_sec = t;
   }
-  else
-  {
-    tv.tv_sec = 1589011873;
-  }
 #endif // BOARD_M5STACK_CORES3
-#else
-  tv.tv_sec = 1589011873;
 #endif
 
   settimeofday(&tv, NULL);
+  sntp_set_time_sync_notification_cb(sntpTimeSyncNotificationCallback);
   struct tm tm;
   if (getLocalTime(&tm, 0))
   {
@@ -5142,6 +5143,16 @@ void Board320_240::netLoop()
   {
     ntpLastAttemptMs = millis();
     ntpSync();
+  }
+
+  if (!liveData->params.ntpTimeSet && liveData->settings.ntpEnabled &&
+      (s_ntpSyncCompleted || sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED))
+  {
+    s_ntpSyncCompleted = false;
+    liveData->params.ntpTimeSet = true;
+    syslog->println("NTP time synchronized.");
+    showTime();
+    syncRtcFromSystemTime();
   }
 
   if (liveData->params.ntpTimeSet)

@@ -689,21 +689,18 @@ void BoardM5stackCoreS3::ntpSync()
   const char *ntpServer3 = "129.6.15.28"; // NIST, avoids DNS dependency
   configTime(liveData->settings.timezone * 3600, liveData->settings.daylightSaving * 3600,
              ntpServer1, ntpServer2, ntpServer3);
+}
 
-  // Single short poll only — netLoop() re-invokes ntpSync() every 5 s within a 60 s
-  // window, so a blocking 10 s wait here is redundant and can trip the task watchdog
-  // when NTP is unreachable.
-  struct tm tmInfo = {};
-  const bool timeOk = getLocalTime(&tmInfo, 250);
-
-  if (timeOk)
+void BoardM5stackCoreS3::syncRtcFromSystemTime()
+{
+  struct tm now;
+  if (getLocalTime(&now, 0))
   {
-    liveData->params.ntpTimeSet = true;
-    showTime();
-  }
-  else
-  {
-    liveData->params.ntpTimeSet = false;
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
+             now.tm_year + 1900, now.tm_mon + 1, now.tm_mday,
+             now.tm_hour, now.tm_min, now.tm_sec);
+    setTime(String(buf));
   }
 }
 
