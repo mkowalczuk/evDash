@@ -1,5 +1,49 @@
 # RELEASE NOTES
 
+### V5.1.0 2026-09-30
+- Home Assistant MQTT Auto-Discovery:
+  - Added optional Home Assistant MQTT Auto-Discovery (`mqttHa`, default `[off]`, settings schema version bumped to `31`).
+  - Automatically registers 50+ entities under Home Assistant device with custom device naming (`haName`, `haModel`) and `evdash_*` entity ID prefixing.
+  - Exposes battery SoC, kWh, SoH, power, voltages, temperatures, TPMS per-wheel pressures, motor RPM/torque, trip/odometer stats, GPS location, and diagnostics with LWT availability.
+- WiFi & BLE coexistence:
+  - Improved RF coexistence on ESP32-S3: BLE comms initialize before WiFi setup to properly register with ESP-IDF RF coexistence manager.
+  - Implemented 60ms BLE command pacing during active WiFi AP connection attempts to prevent 2.4 GHz airtime contention.
+  - Preserved WiFi modem sleep when Bluetooth is active to eliminate ESP-IDF coexistence crash aborts.
+- Time synchronization & RTC:
+  - Non-blocking SNTP async sync callback using ESP-IDF `sntp_set_time_sync_notification_cb`.
+  - Automatically updates hardware RTC (M5Stack Core2 / CoreS3) after successful NTP synchronization.
+- Xpeng vehicle profile:
+  - Added Xpeng profile (`CarXpeng`) supporting 800V architecture and packs up to 212 cells (with runtime cell count auto-detection via DID `221122`).
+  - Added Xpeng vehicle submenu with trim selection for G6 (66/87.5 kWh), G9 (78/93 kWh), P7 (60/83 kWh), P7+ (75 kWh), P5 (66 kWh), G3 (66.5 kWh), and X9 (84.5/101.5 kWh) to configure exact pack capacities.
+  - Dynamically supports both AWD (dual-motor) and 2WD (single-motor) variants by reporting front motor (`0317` RPM, `0319` Torque) and rear motor (`0318` RPM, `031A` Torque) independently.
+  - Decoded per-wheel TPMS tire pressures (`032E`–`0331`) with 1.25 kPa/bit resolution (`raw * 0.0125` bar).
+  - Configured ISO-TP Flow Control frames (`ATFCSD300000`, `ATFCSM1`) on BMS Header `704` to reassemble multi-frame cell voltages and temperatures.
+  - Adapted charging graph scaling to support high-power fast charging and power draw (extending scale dynamically beyond 500+ kW).
+- Multi-AP WiFi fallback:
+  - Added support for up to 4 WiFi access points (`wifiSsid3`, `wifiPassword3`, `wifiSsid4`, `wifiPassword4`).
+  - Implemented cyclic fallback rotation across configured APs ("main", "2nd AP", "3rd AP", "4th AP") with automatic recovery back to primary AP.
+  - Updated serial console, `showNet` status, and menu interface.
+- BLE4 connection & OBDLink CX support:
+  - Gated command queue execution strictly behind ELM327 prompt (`>`) readiness with stall recovery timeout.
+  - Added BLE security pairing callbacks supporting static PIN and LE Secure Connections with MITM bonding.
+  - Added BLE MAC address type configuration (`bleAddressType` = random vs public) with automatic fallback on connection failure.
+- SD card console logging & local web server:
+  - Continuous console mirror logging to timestamped files under `/logs/` on SD card.
+  - Embedded HTTP web server on port 80 to view and download SD log files directly from a browser.
+- Diagnostics & bitmask debug levels:
+  - Rewrote debug levels to an 8-bit bitmask (`DEBUG_COMM`, `DEBUG_NET`, `DEBUG_SDCARD`, `DEBUG_GPS`, `DEBUG_ABRP`, `DEBUG_DISPLAY`) with interactive debug submenu and console bitwise syntax (`debugLevel=comm,abrp`, `debugLevel=+comm,-gps`).
+  - Decoupled console input processing from OBD command queue execution so commands like `help`, `set`, and network utilities respond immediately without waiting for CAN bus timeouts.
+  - Dedicated `DEBUG_ABRP` bitfield to gate verbose ABRP telemetry logging (`ABRP send tick`, payloads, HTTP POST results), preventing console flooding during driving while keeping it easily togglable via `debugLevel` (`debugLevel=abrp`) or menu.
+  - Added LF to CRLF normalization in `LogSerial`.
+- GPS optimization:
+  - Skip GPS initialization and boot delay when `gpsModuleType` is set to NONE.
+- MQTT: secure TLS connection, configurable port, and heartbeat:
+  - Added `mqttUseTls` flag and `mqttPort` setting (stored settings schema version bumped to `30`).
+  - Supports `WiFiClientSecure` transport with `setInsecure()` for encrypted MQTTS connections without requiring pre-shared broker root CAs.
+  - Port is configurable with automatic fallback: defaults to `8883` when secure/TLS is enabled, or `1883` for plain MQTT when port is unset (`0`).
+  - Added menu entries (`MQTT TLS/secure`, `MQTT port`, `MQTT HomeAssistant`) and serial console commands (`mqtt`, `testMqtt`, `mqttEnabled`, `mqttSecure`, `mqttPort`, `mqttServer`, `mqttId`, `mqttUsername`, `mqttPassword`, `mqttPubTopic`, `mqttInterval`, `mqttHa`).
+  - Decoupled MQTT uploads from `remoteApiUrl` HTTP validation, `remoteUploadIntervalSec != 0`, and `socPerc` car connection guard so MQTT sends device heartbeat (`/status`, `/uptimeSec`, `/wifiRssi`, `/carConnected`) and GPS telemetry even when the car is disconnected (defaults to 60s upload interval if API upload interval is off).
+
 ### V5.0.9 2026-08-25
 - Direct-CAN ISO-TP: multi-frame responses longer than 111 bytes no longer get corrupted (found on Peugeot e-208 - the 108 cell voltages never showed on the battery cells screen):
   - Consecutive frames were stored into the reassembly map keyed by the on-wire ISO-TP sequence number, which is only 4 bits and wraps 15->0. Any response needing more than 15 consecutive frames (FF + 15 CF = 111 bytes) overwrote rows 0..15 on the second lap - including row 0 holding the First frame - so the merged response no longer started with `62 DID` and the parser silently dropped it. The e-208 `D440` reply (108 cell voltages, 219 bytes, 31 CFs) hit this every time, while the 54 module temps (`D442`, 8 CFs) worked - exactly the reported symptom. Frames are now keyed by receive order (CAN delivers CFs of one ISO-TP message in order), with a syslog warning when the 4-bit index does not match the expected sequence. Kia/Hyundai read cells in 32-cell blocks (9 CFs) and never triggered the wrap, so nothing changes for them.
