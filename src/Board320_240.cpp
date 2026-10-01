@@ -704,18 +704,12 @@ namespace
 #endif // BOARD_M5STACK_CORES3
 
 /**
-   Init board
+   Read the battery-backed RTC.
+   Returns 0 when the clock has never been set (or holds a pre-2021 date), which
+   tells the caller to fall back to SNTP.
 */
-void Board320_240::initBoard()
+time_t Board320_240::rtcReadTime()
 {
-  liveData->params.booting = true;
-
-  // Init time library
-  struct timeval tv;
-  tv.tv_sec = 0;
-  tv.tv_usec = 0;
-
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
 #ifdef BOARD_M5STACK_CORE2
   RTC_TimeTypeDef RTCtime;
   RTC_DateTypeDef RTCdate;
@@ -731,8 +725,7 @@ void Board320_240::initBoard()
     tm_tmp.tm_min = RTCtime.Minutes;
     tm_tmp.tm_sec = RTCtime.Seconds;
 
-    time_t t = mktime(&tm_tmp);
-    tv.tv_sec = t;
+    return mktime(&tm_tmp);
   }
 #endif // BOARD_M5STACK_CORE2
 #ifdef BOARD_M5STACK_CORES3
@@ -747,11 +740,45 @@ void Board320_240::initBoard()
     tm_tmp.tm_min = dt.time.minutes;
     tm_tmp.tm_sec = dt.time.seconds;
 
-    time_t t = mktime(&tm_tmp);
-    tv.tv_sec = t;
+    return mktime(&tm_tmp);
   }
 #endif // BOARD_M5STACK_CORES3
-#endif
+  return 0;
+}
+
+/**
+   Persist a time correction to the battery-backed RTC.
+*/
+void Board320_240::rtcWriteTime(time_t newTime)
+{
+#ifdef BOARD_M5STACK_CORE2
+  // Core2 stores local wall-clock time. mktime() interpreted the caller's
+  // components as local, so recovering them via localtime() round-trips them.
+  struct tm *tmm = localtime(&newTime);
+  RTC_TimeTypeDef RTCtime = {tmm->tm_hour, tmm->tm_min, tmm->tm_sec};
+  RTC_DateTypeDef RTCdate = {tmm->tm_year + 1900, tmm->tm_mon + 1, tmm->tm_mday};
+
+  M5.Rtc.SetTime(&RTCtime);
+  M5.Rtc.SetDate(&RTCdate);
+#endif // BOARD_M5STACK_CORE2
+#ifdef BOARD_M5STACK_CORES3
+  // CoreS3's library takes a UTC tm, matching the pre-extraction call site.
+  CoreS3.Rtc.setDateTime(gmtime(&newTime));
+#endif // BOARD_M5STACK_CORES3
+}
+
+/**
+   Init board
+*/
+void Board320_240::initBoard()
+{
+  liveData->params.booting = true;
+
+  // Seed the system clock. Boards with a battery-backed RTC supply the initial
+  // time here; the rest return 0 and SNTP establishes it later.
+  struct timeval tv;
+  tv.tv_sec = rtcReadTime();
+  tv.tv_usec = 0;
 
   settimeofday(&tv, NULL);
   sntp_set_time_sync_notification_cb(sntpTimeSyncNotificationCallback);
@@ -2609,22 +2636,7 @@ void Board320_240::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t
   settimeofday(&now, NULL);
   syncTimes(t);
 
-#ifdef BOARD_M5STACK_CORE2
-  RTC_TimeTypeDef RTCtime = {hour, minute, seconds};
-  RTC_DateTypeDef RTCdate = {year, month, day};
-  RTCdate.Year = year;
-  RTCdate.Month = month;
-  RTCdate.Date = day;
-  RTCtime.Hours = hour;
-  RTCtime.Minutes = minute;
-  RTCtime.Seconds = seconds;
-
-  M5.Rtc.SetTime(&RTCtime);
-  M5.Rtc.SetDate(&RTCdate);
-#endif // BOARD_M5STACK_CORE2
-#ifdef BOARD_M5STACK_CORES3
-  CoreS3.Rtc.setDateTime(gmtime(&t));
-#endif // BOARD_M5STACK_CORES3
+  rtcWriteTime(t);
 }
 
 /**
