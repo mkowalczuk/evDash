@@ -1885,6 +1885,149 @@ void Board320_240::syncContributeRelativeTimes(time_t offset)
 }
 
 /**
+ * Button, touch and menu handling for a board with a display.
+ * Debouncing, menu navigation, screen rotation and menu auto-hide.
+ *
+ * Extracted from mainLoop() so BoardCore can call one seam which a displayless
+ * board overrides with a no-op.
+ */
+void Board320_240::handleUiInput()
+{
+    ///////////////////////////////////////////////////////////////////////
+    // Handle buttons
+    // MIDDLE - menu select
+    if (!isButtonPressed(pinButtonMiddle))
+    {
+      btnMiddlePressed = false;
+    }
+    else
+    {
+      if (!btnMiddlePressed)
+      {
+        btnMiddlePressed = true;
+        liveData->params.lastButtonPushedTime = liveData->params.currentTime;
+        tft.setRotation(liveData->settings.displayRotation);
+        if (liveData->menuVisible)
+        {
+          menuItemClick();
+        }
+        else
+        {
+          showMenu();
+        }
+      }
+    }
+    // LEFT - screen rotate, menu
+    if (!isButtonPressed(pinButtonLeft))
+    {
+      btnLeftPressed = false;
+    }
+    else
+    {
+      if (!btnLeftPressed)
+      {
+        btnLeftPressed = true;
+        liveData->params.lastButtonPushedTime = liveData->params.currentTime;
+        tft.setRotation(liveData->settings.displayRotation);
+        // Menu handling
+        if (liveData->menuVisible)
+        {
+          menuMove(false);
+        }
+        else
+        {
+          liveData->params.displayScreen++;
+          if (liveData->params.displayScreen > displayScreenCount - 1)
+            liveData->params.displayScreen = 0; // rotate screens
+          // Turn off display on screen 0
+          setBrightness();
+          redrawScreen();
+        }
+      }
+    }
+    // RIGHT - menu, debug screen rotation
+    if (!isButtonPressed(pinButtonRight))
+    {
+      btnRightPressed = false;
+    }
+    else
+    {
+      if (!btnRightPressed)
+      {
+        btnRightPressed = true;
+        liveData->params.lastButtonPushedTime = liveData->params.currentTime;
+        tft.setRotation(liveData->settings.displayRotation);
+        // Menu handling
+        if (liveData->menuVisible)
+        {
+          menuMove(true);
+        }
+        else
+        {
+          // doAction
+          if (liveData->params.displayScreen == SCREEN_SPEED)
+          {
+            liveData->params.displayScreen = SCREEN_HUD;
+            tft.fillScreen(TFT_BLACK);
+            redrawScreen();
+          }
+          else if (liveData->params.displayScreen == SCREEN_HUD)
+          {
+            liveData->params.displayScreen = SCREEN_SPEED;
+            redrawScreen();
+          }
+
+          setBrightness();
+        }
+      }
+    }
+    // Both left&right button (hide menu)
+    if (isButtonPressed(pinButtonLeft) && isButtonPressed(pinButtonRight))
+    {
+      hideMenu();
+    }
+
+    if (liveData->menuVisible &&
+        liveData->params.currentTime - liveData->params.lastButtonPushedTime >= kMenuAutoHideTimeoutSec)
+    {
+      hideMenu();
+    }
+
+}
+
+/**
+ * Display housekeeping for a board with a screen: automatic sleep after
+ * inactivity, brightness, and the periodic redraw.
+ *
+ * Extracted from mainLoop() for the same reason as handleUiInput(). commLoop()
+ * deliberately stays in mainLoop(): reading BLE/CAN data is not display work and
+ * must keep running on a board with no screen.
+ */
+void Board320_240::updateScreen()
+{
+    // Automatic sleep after inactivity
+    if (liveData->params.currentTime - liveData->params.lastIgnitionOnTime > 10 &&
+        liveData->settings.sleepModeLevel >= SLEEP_MODE_SCREEN_ONLY &&
+        liveData->params.currentTime - liveData->params.lastButtonPushedTime > 30 &&
+        (liveData->params.currentTime - liveData->params.wakeUpTime > 60))
+    {
+      turnOffScreen();
+    }
+    else
+    {
+      setBrightness();
+    }
+
+    // force redraw (min 1 sec update; slower while in Sentry)
+    const time_t redrawIntervalSec = liveData->params.stopCommandQueue ? 2 : 1;
+    if (!screenSwipePreviewActive &&
+        (liveData->params.currentTime - lastRedrawTime >= redrawIntervalSec || liveData->redrawScreenRequested))
+    {
+      redrawScreen();
+    }
+}
+
+/**
  * Main loop - primary thread
  */
 void Board320_240::mainLoop()
@@ -1900,105 +2043,8 @@ void Board320_240::mainLoop()
   // board loop
   boardLoop();
 
-  ///////////////////////////////////////////////////////////////////////
-  // Handle buttons
-  // MIDDLE - menu select
-  if (!isButtonPressed(pinButtonMiddle))
-  {
-    btnMiddlePressed = false;
-  }
-  else
-  {
-    if (!btnMiddlePressed)
-    {
-      btnMiddlePressed = true;
-      liveData->params.lastButtonPushedTime = liveData->params.currentTime;
-      tft.setRotation(liveData->settings.displayRotation);
-      if (liveData->menuVisible)
-      {
-        menuItemClick();
-      }
-      else
-      {
-        showMenu();
-      }
-    }
-  }
-  // LEFT - screen rotate, menu
-  if (!isButtonPressed(pinButtonLeft))
-  {
-    btnLeftPressed = false;
-  }
-  else
-  {
-    if (!btnLeftPressed)
-    {
-      btnLeftPressed = true;
-      liveData->params.lastButtonPushedTime = liveData->params.currentTime;
-      tft.setRotation(liveData->settings.displayRotation);
-      // Menu handling
-      if (liveData->menuVisible)
-      {
-        menuMove(false);
-      }
-      else
-      {
-        liveData->params.displayScreen++;
-        if (liveData->params.displayScreen > displayScreenCount - 1)
-          liveData->params.displayScreen = 0; // rotate screens
-        // Turn off display on screen 0
-        setBrightness();
-        redrawScreen();
-      }
-    }
-  }
-  // RIGHT - menu, debug screen rotation
-  if (!isButtonPressed(pinButtonRight))
-  {
-    btnRightPressed = false;
-  }
-  else
-  {
-    if (!btnRightPressed)
-    {
-      btnRightPressed = true;
-      liveData->params.lastButtonPushedTime = liveData->params.currentTime;
-      tft.setRotation(liveData->settings.displayRotation);
-      // Menu handling
-      if (liveData->menuVisible)
-      {
-        menuMove(true);
-      }
-      else
-      {
-        // doAction
-        if (liveData->params.displayScreen == SCREEN_SPEED)
-        {
-          liveData->params.displayScreen = SCREEN_HUD;
-          tft.fillScreen(TFT_BLACK);
-          redrawScreen();
-        }
-        else if (liveData->params.displayScreen == SCREEN_HUD)
-        {
-          liveData->params.displayScreen = SCREEN_SPEED;
-          redrawScreen();
-        }
-
-        setBrightness();
-      }
-    }
-  }
-  // Both left&right button (hide menu)
-  if (isButtonPressed(pinButtonLeft) && isButtonPressed(pinButtonRight))
-  {
-    hideMenu();
-  }
-
-  if (liveData->menuVisible &&
-      liveData->params.currentTime - liveData->params.lastButtonPushedTime >= kMenuAutoHideTimeoutSec)
-  {
-    hideMenu();
-  }
+  // Buttons, touch, menu
+  handleUiInput();
 
   const bool allowGpsProcessing = !(liveData->params.stopCommandQueue && liveData->settings.voltmeterEnabled == 1);
   if (allowGpsProcessing)
@@ -2523,29 +2569,11 @@ void Board320_240::mainLoop()
     }
   }
 
-  // Automatic sleep after inactivity
-  if (liveData->params.currentTime - liveData->params.lastIgnitionOnTime > 10 &&
-      liveData->settings.sleepModeLevel >= SLEEP_MODE_SCREEN_ONLY &&
-      liveData->params.currentTime - liveData->params.lastButtonPushedTime > 30 &&
-      (liveData->params.currentTime - liveData->params.wakeUpTime > 60))
-  {
-    turnOffScreen();
-  }
-  else
-  {
-    setBrightness();
-  }
+  // Display sleep, brightness and redraw
+  updateScreen();
 
   // Read data from BLE/CAN
   commLoop();
-
-  // force redraw (min 1 sec update; slower while in Sentry)
-  const time_t redrawIntervalSec = liveData->params.stopCommandQueue ? 2 : 1;
-  if (!screenSwipePreviewActive &&
-      (liveData->params.currentTime - lastRedrawTime >= redrawIntervalSec || liveData->redrawScreenRequested))
-  {
-    redrawScreen();
-  }
 
   // Calculating avg.speed and time in forward mode
   if (liveData->params.odoKm != -1 && forwardDriveOdoKmLast == -1)

@@ -276,8 +276,11 @@ public:
   bool canStatusMessageHitTest(int16_t x, int16_t y);
   void dismissCanStatusMessage();
   inline bool isUpperLeftTouch(int16_t x, int16_t y) const { return x < 64 && y < 64; }
-  void showBootProgress(const char *step, const char *detail, uint16_t bgColor = TFT_BLACK);
+  void showBootProgress(const char *step, const char *detail, uint16_t bgColor = TFT_BLACK) override;
   // Basic GUI
+  // Extracted from mainLoop(): display work a displayless board skips entirely.
+  void handleUiInput() override;
+  void updateScreen() override;
   void turnOffScreen() override;
   void setBrightness() override;
   void displayMessage(const char *row1, const char *row2) override;
