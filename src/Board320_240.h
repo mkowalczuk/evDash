@@ -240,6 +240,7 @@ public:
   void otaUpdate() override;
   // SD card
   bool sdcardMount() override;
+  bool sdBegin() override;
   void sdcardToggleRecording() override;
   void sdcardEraseLogs();
   void enforceSdLogSpaceLimit();

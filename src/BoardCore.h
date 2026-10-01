@@ -37,6 +37,14 @@ public:
   // display bookkeeping that BoardCore calls unconditionally.
   virtual void handleUiInput();
   virtual void updateScreen();
+  //
+  // Storage
+  //
+  // How the SD/TF card is electrically attached varies by board: the M5 boards
+  // use SPI with a chip-select pin, the Waveshare board uses the ESP32-S3's SDMMC
+  // peripheral with fixed clock/command/data pins. sdBegin() is that choice;
+  // everything above it (recording, log rotation, chunked upload) is shared.
+  virtual bool sdBegin();
   virtual void displayMessage(const char *row1, const char *row2) { (void)row1; (void)row2; }
   virtual void turnOffScreen() {}
   virtual void setBrightness() {}
