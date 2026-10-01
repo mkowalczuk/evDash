@@ -56,10 +56,8 @@ So in summary, it initializes the core display and hardware functionality, retri
 #include "EvDashMobileRelay.h"
 #include "traccar.h"
 #include <esp_sntp.h>
-
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
 #include <PubSubClient.h>
-#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3
+
 
 extern EvDashMobileRelay *mobileRelay;
 
@@ -132,7 +130,6 @@ namespace
   static char gAbrpEncodedPayloadBuffer[kAbrpFormBufferSize];
   static char gAbrpFormBuffer[kAbrpFormBufferSize];
 
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
   bool publishMqttFloat(PubSubClient &client, const char *baseTopic, const char *suffix, float value, uint8_t precision = 2, bool retain = false)
   {
     char topic[80];
@@ -169,7 +166,7 @@ namespace
     snprintf(tmpVal, sizeof(tmpVal), "%ld", static_cast<long>(value));
     return client.publish(topic, tmpVal, retain);
   }
-#endif
+
 
   struct HeapCapsJsonAllocator
   {
@@ -698,10 +695,24 @@ namespace
   }
 } // namespace
 
-#ifdef BOARD_M5STACK_CORES3
-// SD card
-#define TFCARD_CS_PIN 4
-#endif // BOARD_M5STACK_CORES3
+/**
+   Bring up the SD/TF card over SPI.
+   The M5 boards expose the card on the SPI bus behind a chip-select pin.
+   Core2's pin came from M5Core2's own utility/Config.h, which Board320_240
+   included transitively; it is now stated here rather than relied upon.
+*/
+bool Board320_240::sdBegin()
+{
+#if defined(BOARD_M5STACK_CORES3) || defined(BOARD_M5STACK_CORE2)
+  // Named "sTfCardCs" rather than TFCARD_CS_PIN because M5Core2's utility/Config.h
+  // defines that as a macro, and a local of the same name does not compile.
+  const uint8_t sTfCardCs = 4;
+  return SD.begin(sTfCardCs, SPI, 40000000);
+#else
+  // No SPI SD slot on this board variant.
+  return false;
+#endif
+}
 
 /**
    Read the battery-backed RTC.
@@ -2737,7 +2748,7 @@ bool Board320_240::sdcardMount()
 
   bool SdState = false;
   syslog->print("Initializing SD card...");
-  SdState = SD.begin(TFCARD_CS_PIN, SPI, 40000000);
+  SdState = sdBegin();
   if (SdState)
   {
 
@@ -4906,7 +4917,6 @@ void Board320_240::updateNetAvailability(bool success)
   }
 }
 
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
 bool Board320_240::ensureMqttConnected()
 {
   if (liveData->settings.mqttEnabled != 1)
@@ -5238,12 +5248,6 @@ void Board320_240::publishHomeAssistantDiscovery()
 
   syslog->info(DEBUG_NET, "Home Assistant MQTT discovery published (retained).");
 }
-#else
-bool Board320_240::ensureMqttConnected() { return false; }
-void Board320_240::disconnectMqtt(bool sendOfflineStatus) {}
-void Board320_240::publishHomeAssistantDiscovery() {}
-void Board320_240::publishHaSensor(const char *, const char *, const char *, const char *, const char *, const char *, const char *, const char *, const char *) {}
-#endif
 
 /**
  * Net loop, send data over net
@@ -5267,15 +5271,6 @@ void Board320_240::netLoop()
     dismissedNetFailureTime = 0;
     disconnectMqtt(false);
   }
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
-  else if (liveData->settings.mqttEnabled == 1)
-  {
-    if (mqttClient != nullptr && mqttClient->connected())
-    {
-      mqttClient->loop();
-    }
-  }
-#endif
 
   // Avoid stale "Net unavailable" state when no internet uploader is effectively active.
   const auto remoteApiConfigured = [this]() -> bool
@@ -5646,7 +5641,6 @@ bool Board320_240::netSendData(bool sendAbrp)
     {
       if (liveData->settings.mqttEnabled == 1)
       {
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
         if (ensureMqttConnected())
         {
           bool published = true;
@@ -5824,9 +5818,6 @@ bool Board320_240::netSendData(bool sendAbrp)
         {
           rc = -1;
         }
-#else
-        rc = -1;
-#endif
       }
       else
       {
@@ -6106,555 +6097,6 @@ bool Board320_240::netContributeData()
   int rc = 0;
 
 // Only for core2
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
-  // Contribute data (api.evdash.eu/v1/contribute) to project author (nick.n17@gmail.com)
-  if (liveData->settings.wifiEnabled == 1 && WiFi.status() == WL_CONNECTED &&
-      liveData->params.contributeStatus == CONTRIBUTE_READY_TO_SEND)
-  {
-    syslog->info(DEBUG_NET, "Contribute data...");
-    if (isMobileRelayClientConnected())
-    {
-      syslog->info(DEBUG_NET, "Contribute upload: mobile relay stays active");
-    }
-    const char *contributeHost = "api.evdash.eu";
-    const char *contributeUrl = "https://api.evdash.eu/v1/contribute";
-    const char *contributePath = "/v1/contribute";
-    const String contributeUserAgent = String("evDash/") + String(APP_VERSION);
-    char *payloadForPost = nullptr;
-    size_t payloadForPostLen = 0;
-    bool payloadForPostInPsram = false;
-    auto scheduleNextContributeCycle = [&]()
-    {
-      liveData->params.contributeStatus = CONTRIBUTE_NONE;
-      contributeStatusSinceMs = 0;
-      nextContributeCycleAtMs = millis() + kContributeCycleIntervalMs;
-    };
-    {
-      String payloadJson;
-      payloadJson.reserve(4096);
-      if (!buildContributePayloadV2(payloadJson, false))
-      {
-        syslog->info(DEBUG_NET, "Failed to build contribute v2 payload");
-        scheduleNextContributeCycle();
-        updateNetAvailability(false);
-        return false;
-      }
-      if (isContributeV2SnapshotEffectivelyEmpty(liveData))
-      {
-        syslog->info(DEBUG_NET, "Contribute v2 empty snapshot, skipping send");
-        scheduleNextContributeCycle();
-        return false;
-      }
-
-      if (payloadJson.length() < 2 || payloadJson.charAt(0) != '{' || payloadJson.charAt(payloadJson.length() - 1) != '}')
-      {
-        syslog->info(DEBUG_NET, "Contribute payload invalid, skipping send");
-        scheduleNextContributeCycle();
-        updateNetAvailability(false);
-        return false;
-      }
-      payloadForPostLen = payloadJson.length();
-      payloadForPost = allocContributePayloadBuffer(payloadForPostLen, payloadForPostInPsram);
-      if (payloadForPost == nullptr)
-      {
-        syslog->info(DEBUG_NET, "Contribute payload buffer allocation failed");
-        scheduleNextContributeCycle();
-        updateNetAvailability(false);
-        return false;
-      }
-      memcpy(payloadForPost, payloadJson.c_str(), payloadForPostLen + 1);
-    }
-    syslog->infoNolf(DEBUG_NET, "Contribute payload bytes: ");
-    syslog->info(DEBUG_NET, payloadForPostLen);
-    syslog->infoNolf(DEBUG_NET, "Contribute payload buffer: ");
-    syslog->info(DEBUG_NET, payloadForPostInPsram ? "psram" : "internal");
-
-    auto printContributeHeap = [&]()
-    {
-      if (!syslog->isDebug(DEBUG_NET))
-      {
-        return;
-      }
-      syslog->infoNolf(DEBUG_NET, "Heap intFree/intLargest/psram: ");
-      syslog->info(DEBUG_NET, String(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                              String(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)) + " / " +
-                              String(ESP.getFreePsram()));
-    };
-    syslog->info(DEBUG_NET, "Contribute TLS: BLE stays active");
-    printContributeHeap();
-
-    String responsePayload = "";
-    int lastTlsErrCode = 0;
-    String lastTlsErrText = "";
-    auto postContributePayload = [&](String &outResponse, uint8_t attemptNo) -> int
-    {
-      const uint32_t startedMs = millis();
-      lastTlsErrCode = 0;
-      lastTlsErrText = "";
-      WiFiClientSecure client;
-      HTTPClient http;
-      // Deliberately unvalidated — this is the memory-critical contribute path that
-      // already fails with TLS BIGNUM-alloc errors under BLE+WiFi on Core2 (issue
-      // #123); adding CA-chain verification raises that pressure. Leaked data is the
-      // contribute token + telemetry, not RCE. See evdash_certs.h / ABRP note above.
-      client.setInsecure();
-      client.setHandshakeTimeout((kContributeHttpsConnectTimeoutMs + 999) / 1000);
-      client.setTimeout((kContributeHttpsIoTimeoutMs + 999) / 1000);
-      const bool beginOk = http.begin(client, contributeUrl);
-      if (!beginOk)
-      {
-        syslog->infoNolf(DEBUG_NET, "Contribute POST attempt ");
-        syslog->infoNolf(DEBUG_NET, attemptNo);
-        syslog->info(DEBUG_NET, ": http.begin failed");
-        outResponse = "";
-        return -1;
-      }
-      http.setConnectTimeout(kContributeHttpsConnectTimeoutMs);
-      http.setTimeout(kContributeHttpsIoTimeoutMs);
-      http.useHTTP10(true);
-      http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
-      http.addHeader("Content-Type", "application/json");
-      http.addHeader("User-Agent", contributeUserAgent);
-      http.addHeader("Accept", "application/json");
-      http.addHeader("Connection", "close");
-      addWifiTransferredBytes(payloadForPostLen);
-      const int postRc = http.POST((uint8_t *)payloadForPost, payloadForPostLen);
-      const uint32_t elapsedMs = millis() - startedMs;
-      syslog->infoNolf(DEBUG_NET, "Contribute POST attempt ");
-      syslog->infoNolf(DEBUG_NET, attemptNo);
-      syslog->infoNolf(DEBUG_NET, " rc=");
-      syslog->infoNolf(DEBUG_NET, postRc);
-      syslog->infoNolf(DEBUG_NET, " (");
-      syslog->infoNolf(DEBUG_NET, elapsedMs);
-      syslog->info(DEBUG_NET, "ms)");
-      outResponse = "";
-      if (postRc > 0)
-      {
-        outResponse = http.getString();
-      }
-      else
-      {
-        char tlsErrBuf[160] = {0};
-        lastTlsErrCode = client.lastError(tlsErrBuf, sizeof(tlsErrBuf));
-        lastTlsErrText = String(tlsErrBuf);
-        syslog->infoNolf(DEBUG_NET, "Contribute TLS lastError: ");
-        syslog->infoNolf(DEBUG_NET, lastTlsErrCode);
-        syslog->infoNolf(DEBUG_NET, " ");
-        syslog->info(DEBUG_NET, tlsErrBuf);
-        printContributeHeap();
-      }
-      http.end();
-      client.stop();
-      return postRc;
-    };
-
-    auto postContributePayloadRawTls = [&](String &outResponse, const IPAddress &ip, uint8_t attemptNo) -> int
-    {
-      const uint32_t startedMs = millis();
-      outResponse = "";
-      lastTlsErrCode = 0;
-      lastTlsErrText = "";
-
-      WiFiClientSecure client;
-      client.setInsecure();
-      client.setHandshakeTimeout((kContributeHttpsConnectTimeoutMs + 999) / 1000);
-      client.setTimeout((kContributeHttpsIoTimeoutMs + 999) / 1000);
-
-      if (!client.connect(ip, 443, contributeHost, nullptr, nullptr, nullptr))
-      {
-        char tlsErrBuf[160] = {0};
-        lastTlsErrCode = client.lastError(tlsErrBuf, sizeof(tlsErrBuf));
-        lastTlsErrText = String(tlsErrBuf);
-        const uint32_t elapsedMs = millis() - startedMs;
-        syslog->infoNolf(DEBUG_NET, "Contribute RAW TLS attempt ");
-        syslog->infoNolf(DEBUG_NET, attemptNo);
-        syslog->infoNolf(DEBUG_NET, " connect failed (");
-        syslog->infoNolf(DEBUG_NET, elapsedMs);
-        syslog->info(DEBUG_NET, "ms)");
-        syslog->infoNolf(DEBUG_NET, "Contribute TLS lastError: ");
-        syslog->infoNolf(DEBUG_NET, lastTlsErrCode);
-        syslog->infoNolf(DEBUG_NET, " ");
-        syslog->info(DEBUG_NET, tlsErrBuf);
-        client.stop();
-        return -1;
-      }
-
-      String headers = String("POST ") + contributePath + " HTTP/1.0\r\n" +
-                       "Host: " + contributeHost + "\r\n" +
-                       "Content-Type: application/json\r\n" +
-                       "User-Agent: " + contributeUserAgent + "\r\n" +
-                       "Accept: application/json\r\n" +
-                       "Connection: close\r\n" +
-                       "Content-Length: " + String(payloadForPostLen) + "\r\n\r\n";
-
-      addWifiTransferredBytes(headers.length() + payloadForPostLen);
-      client.print(headers);
-      const size_t written = client.write((const uint8_t *)payloadForPost, payloadForPostLen);
-      if (written != payloadForPostLen)
-      {
-        syslog->infoNolf(DEBUG_NET, "Contribute RAW TLS payload short write: ");
-        syslog->infoNolf(DEBUG_NET, written);
-        syslog->infoNolf(DEBUG_NET, "/");
-        syslog->info(DEBUG_NET, payloadForPostLen);
-      }
-
-      String rawResponse = "";
-      const uint32_t readTimeoutMs = kContributeHttpsIoTimeoutMs;
-      uint32_t lastDataMs = millis();
-      while ((millis() - lastDataMs) < readTimeoutMs)
-      {
-        while (client.available())
-        {
-          const char nextChar = static_cast<char>(client.read());
-          if (rawResponse.length() < kContributeResponseBufferCap)
-          {
-            rawResponse += nextChar;
-          }
-          lastDataMs = millis();
-        }
-        if (!client.connected())
-        {
-          break;
-        }
-        delay(2);
-      }
-
-      int statusCode = -1;
-      const int lineEnd = rawResponse.indexOf("\r\n");
-      if (lineEnd > 0)
-      {
-        const String statusLine = rawResponse.substring(0, lineEnd);
-        const int sp1 = statusLine.indexOf(' ');
-        if (sp1 > 0)
-        {
-          const int sp2 = statusLine.indexOf(' ', sp1 + 1);
-          if (sp2 > sp1)
-          {
-            statusCode = statusLine.substring(sp1 + 1, sp2).toInt();
-          }
-          else
-          {
-            statusCode = statusLine.substring(sp1 + 1).toInt();
-          }
-        }
-      }
-
-      const int bodyPos = rawResponse.indexOf("\r\n\r\n");
-      if (bodyPos >= 0)
-      {
-        outResponse = rawResponse.substring(bodyPos + 4);
-      }
-      else
-      {
-        outResponse = rawResponse;
-      }
-
-      const uint32_t elapsedMs = millis() - startedMs;
-      syslog->infoNolf(DEBUG_NET, "Contribute RAW TLS attempt ");
-      syslog->infoNolf(DEBUG_NET, attemptNo);
-      syslog->infoNolf(DEBUG_NET, " rc=");
-      syslog->infoNolf(DEBUG_NET, statusCode);
-      syslog->infoNolf(DEBUG_NET, " (");
-      syslog->infoNolf(DEBUG_NET, elapsedMs);
-      syslog->info(DEBUG_NET, "ms)");
-
-      client.stop();
-      return statusCode;
-    };
-
-    auto postContributePayloadHttp = [&](String &outResponse, uint8_t attemptNo) -> int
-    {
-      const uint32_t startedMs = millis();
-      outResponse = "";
-
-      WiFiClient client;
-      client.setTimeout((kContributeHttpReadTimeoutMs + 999) / 1000);
-
-      if (!client.connect(contributeHost, 80, kContributeHttpConnectTimeoutMs))
-      {
-        const uint32_t elapsedMs = millis() - startedMs;
-        syslog->infoNolf(DEBUG_NET, "Contribute HTTP fallback attempt ");
-        syslog->infoNolf(DEBUG_NET, attemptNo);
-        syslog->infoNolf(DEBUG_NET, " connect failed (");
-        syslog->infoNolf(DEBUG_NET, elapsedMs);
-        syslog->info(DEBUG_NET, "ms)");
-        client.stop();
-        return -1;
-      }
-
-      String headers = String("POST ") + contributePath + " HTTP/1.0\r\n" +
-                       "Host: " + contributeHost + "\r\n" +
-                       "Content-Type: application/json\r\n" +
-                       "User-Agent: " + contributeUserAgent + "\r\n" +
-                       "Accept: application/json\r\n" +
-                       "Connection: close\r\n" +
-                       "Content-Length: " + String(payloadForPostLen) + "\r\n\r\n";
-
-      addWifiTransferredBytes(headers.length() + payloadForPostLen);
-      client.print(headers);
-      const size_t written = client.write((const uint8_t *)payloadForPost, payloadForPostLen);
-      if (written != payloadForPostLen)
-      {
-        syslog->infoNolf(DEBUG_NET, "Contribute HTTP fallback payload short write: ");
-        syslog->infoNolf(DEBUG_NET, written);
-        syslog->infoNolf(DEBUG_NET, "/");
-        syslog->info(DEBUG_NET, payloadForPostLen);
-      }
-
-      String rawResponse = "";
-      const uint32_t readTimeoutMs = kContributeHttpReadTimeoutMs;
-      uint32_t lastDataMs = millis();
-      while ((millis() - lastDataMs) < readTimeoutMs)
-      {
-        while (client.available())
-        {
-          const char nextChar = static_cast<char>(client.read());
-          if (rawResponse.length() < kContributeResponseBufferCap)
-          {
-            rawResponse += nextChar;
-          }
-          lastDataMs = millis();
-        }
-        if (!client.connected())
-        {
-          break;
-        }
-        delay(2);
-      }
-
-      int statusCode = -1;
-      const int lineEnd = rawResponse.indexOf("\r\n");
-      if (lineEnd > 0)
-      {
-        const String statusLine = rawResponse.substring(0, lineEnd);
-        const int sp1 = statusLine.indexOf(' ');
-        if (sp1 > 0)
-        {
-          const int sp2 = statusLine.indexOf(' ', sp1 + 1);
-          if (sp2 > sp1)
-          {
-            statusCode = statusLine.substring(sp1 + 1, sp2).toInt();
-          }
-          else
-          {
-            statusCode = statusLine.substring(sp1 + 1).toInt();
-          }
-        }
-      }
-
-      const int bodyPos = rawResponse.indexOf("\r\n\r\n");
-      if (bodyPos >= 0)
-      {
-        outResponse = rawResponse.substring(bodyPos + 4);
-      }
-      else
-      {
-        outResponse = rawResponse;
-      }
-
-      const uint32_t elapsedMs = millis() - startedMs;
-      syslog->infoNolf(DEBUG_NET, "Contribute HTTP fallback attempt ");
-      syslog->infoNolf(DEBUG_NET, attemptNo);
-      syslog->infoNolf(DEBUG_NET, " rc=");
-      syslog->infoNolf(DEBUG_NET, statusCode);
-      syslog->infoNolf(DEBUG_NET, " (");
-      syslog->infoNolf(DEBUG_NET, elapsedMs);
-      syslog->info(DEBUG_NET, "ms)");
-
-      client.stop();
-      return statusCode;
-    };
-
-    IPAddress resolvedHost;
-    int dnsRc = WiFi.hostByName(contributeHost, resolvedHost);
-    syslog->infoNolf(DEBUG_NET, "Contribute DNS ");
-    syslog->infoNolf(DEBUG_NET, contributeHost);
-    syslog->infoNolf(DEBUG_NET, ": ");
-    if (dnsRc == 1)
-    {
-      syslog->info(DEBUG_NET, resolvedHost.toString());
-    }
-    else
-    {
-      syslog->info(DEBUG_NET, "resolve_failed");
-    }
-
-    bool usedRawTlsFirst = false;
-    if (dnsRc == 1)
-    {
-      usedRawTlsFirst = true;
-      syslog->info(DEBUG_NET, "Contribute HTTPS: raw TLS POST with SNI...");
-      rc = postContributePayloadRawTls(responsePayload, resolvedHost, 1);
-    }
-    else
-    {
-      rc = postContributePayload(responsePayload, 1);
-    }
-
-    bool tlsMemIssue = isTlsMemoryIssue(lastTlsErrCode, lastTlsErrText);
-    if (rc < 0)
-    {
-      if (syslog->isDebug(DEBUG_NET))
-      {
-        syslog->info(DEBUG_NET, String("WiFi RSSI/ch/BSSID: ") + String(WiFi.RSSI()) + " / " + String(WiFi.channel()) + " / " + WiFi.BSSIDstr());
-      }
-      if (dnsRc == 1 && kContributeEnableTcpProbe)
-      {
-        WiFiClient tcpProbe;
-        const uint32_t tcpStartedMs = millis();
-        const int tcpRc = tcpProbe.connect(resolvedHost, 443, 2000);
-        const uint32_t tcpElapsedMs = millis() - tcpStartedMs;
-        syslog->infoNolf(DEBUG_NET, "Contribute TCP probe ");
-        syslog->infoNolf(DEBUG_NET, resolvedHost.toString());
-        syslog->infoNolf(DEBUG_NET, ":443 rc=");
-        syslog->infoNolf(DEBUG_NET, tcpRc);
-        syslog->infoNolf(DEBUG_NET, " (");
-        syslog->infoNolf(DEBUG_NET, tcpElapsedMs);
-        syslog->info(DEBUG_NET, "ms)");
-        tcpProbe.stop();
-      }
-      if (!tlsMemIssue)
-      {
-        if (kContributeRetryOnceOnFail)
-        {
-          syslog->info(DEBUG_NET, "Retry contribute POST once...");
-          delay(250);
-          if (dnsRc == 1)
-          {
-            rc = postContributePayloadRawTls(responsePayload, resolvedHost, 2);
-          }
-          else
-          {
-            rc = postContributePayload(responsePayload, 2);
-          }
-          tlsMemIssue = isTlsMemoryIssue(lastTlsErrCode, lastTlsErrText);
-        }
-        else
-        {
-          syslog->info(DEBUG_NET, "Contribute HTTPS retry disabled (stability mode)");
-        }
-      }
-      else
-      {
-        syslog->info(DEBUG_NET, "Contribute HTTPS retry skipped (TLS memory issue on attempt 1)");
-      }
-    }
-
-    if (kContributeRawTlsFallbackOnTlsMem && rc < 0 && dnsRc == 1 && !usedRawTlsFirst)
-    {
-      syslog->info(DEBUG_NET, "Contribute HTTPS fallback: raw TLS POST with SNI...");
-      rc = postContributePayloadRawTls(responsePayload, resolvedHost, 3);
-      tlsMemIssue = isTlsMemoryIssue(lastTlsErrCode, lastTlsErrText);
-    }
-
-    if (kContributeHttpFallbackOnTlsMem && rc < 0 && tlsMemIssue)
-    {
-      syslog->info(DEBUG_NET, "Contribute TLS memory workaround: plain HTTP fallback...");
-      rc = postContributePayloadHttp(responsePayload, 4);
-      if (rc > 0)
-      {
-        tlsMemIssue = false;
-      }
-    }
-
-    if (rc < 0 && tlsMemIssue)
-    {
-      syslog->info(DEBUG_NET, "Contribute HTTPS TLS memory issue detected in low-memory mode.");
-    }
-
-    if (rc == HTTP_CODE_OK)
-    {
-      bool responseAccepted = true;
-      syslog->infoNolf(DEBUG_NET, "HTTP Response (");
-      syslog->infoNolf(DEBUG_NET, contributeHost);
-      syslog->infoNolf(DEBUG_NET, "): ");
-      syslog->info(DEBUG_NET, responsePayload);
-
-      StaticJsonDocument<256> doc;
-      DeserializationError error = deserializeJson(doc, responsePayload);
-      if (!error)
-      {
-        const char *status = doc["status"];
-        if (status != nullptr && strcmp(status, "ok") != 0)
-        {
-          responseAccepted = false;
-          syslog->infoNolf(DEBUG_NET, "Contribute rejected by server: ");
-          syslog->info(DEBUG_NET, status);
-        }
-
-        const char *token = doc["token"];
-        if (token != nullptr && strlen(token) > 10 &&
-            strcmp(liveData->settings.contributeToken, token) != 0)
-        {
-          syslog->infoNolf(DEBUG_NET, "Assigned token: ");
-          syslog->info(DEBUG_NET, token);
-          strncpy(liveData->settings.contributeToken, token, sizeof(liveData->settings.contributeToken) - 1);
-          liveData->settings.contributeToken[sizeof(liveData->settings.contributeToken) - 1] = '\0';
-          saveSettings();
-        }
-      }
-      else
-      {
-        // Keep upload as successful even when payload is non-JSON due proxy/WAF text.
-        syslog->infoNolf(DEBUG_NET, "Contribute response parse error: ");
-        syslog->info(DEBUG_NET, error.c_str());
-      }
-
-      if (responseAccepted)
-      {
-        scheduleNextContributeCycle();
-        liveData->params.lastSuccessNetSendTime = liveData->params.currentTime;
-        updateNetAvailability(true);
-      }
-      else
-      {
-        scheduleNextContributeCycle();
-        updateNetAvailability(false);
-      }
-    }
-    else
-    {
-      // Failed...
-      if (rc > 0)
-      {
-        syslog->infoNolf(DEBUG_NET, "HTTP POST status: ");
-        syslog->info(DEBUG_NET, rc);
-        if (responsePayload.length() > 0 && syslog->isDebug(DEBUG_NET))
-        {
-          String responsePreview = responsePayload;
-          responsePreview.replace('\r', ' ');
-          responsePreview.replace('\n', ' ');
-          if (responsePreview.length() > 180)
-          {
-            responsePreview = responsePreview.substring(0, 180) + "...";
-          }
-          syslog->infoNolf(DEBUG_NET, "HTTP Response preview (");
-          syslog->infoNolf(DEBUG_NET, contributeHost);
-          syslog->infoNolf(DEBUG_NET, "): ");
-          syslog->info(DEBUG_NET, responsePreview);
-        }
-      }
-      else
-      {
-        syslog->infoNolf(DEBUG_NET, "HTTP POST error: ");
-        syslog->info(DEBUG_NET, rc);
-        syslog->infoNolf(DEBUG_NET, "HTTP POST error text: ");
-        syslog->info(DEBUG_NET, HTTPClient::errorToString(rc).c_str());
-      }
-      if (syslog->isDebug(DEBUG_NET))
-      {
-        syslog->infoNolf(DEBUG_NET, "WiFi status/IP/GW/DNS: ");
-        syslog->info(DEBUG_NET, String(WiFi.status()) + " / " +
-                        WiFi.localIP().toString() + " / " +
-                        WiFi.gatewayIP().toString() + " / " +
-                        WiFi.dnsIP(0).toString());
-      }
-      scheduleNextContributeCycle();
-      updateNetAvailability(false);
-    }
-    free(payloadForPost);
-  }
-#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3
 
   return true;
 }
