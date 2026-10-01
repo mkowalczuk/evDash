@@ -693,15 +693,9 @@ void BoardM5stackCoreS3::ntpSync()
 
 void BoardM5stackCoreS3::syncRtcFromSystemTime()
 {
-  struct tm now;
-  if (getLocalTime(&now, 0))
-  {
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
-             now.tm_year + 1900, now.tm_mon + 1, now.tm_mday,
-             now.tm_hour, now.tm_min, now.tm_sec);
-    setTime(String(buf));
-  }
+  // Persist through the BoardCore RTC seam rather than touching CoreS3.Rtc
+  // directly, so a board whose clock is stored differently still gets written.
+  rtcWriteTime(time(nullptr));
 }
 
 #endif // BOARD_M5STACK_CORES3
