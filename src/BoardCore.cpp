@@ -1,6 +1,20 @@
 #include "BoardCore.h"
 
 /**
+ * Default UI handling: nothing to poll on a board with no buttons or touch.
+ */
+void BoardCore::handleUiInput()
+{
+}
+
+/**
+ * Default screen update: nothing to draw without a display.
+ */
+void BoardCore::updateScreen()
+{
+}
+
+/**
  * Default RTC behaviour: no battery-backed clock on this board.
  *
  * Returning 0 means "no time available" - callers treat that as "fall back to

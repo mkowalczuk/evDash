@@ -29,4 +29,25 @@ public:
   // the graphics ones below.
   virtual time_t rtcReadTime();
   virtual void rtcWriteTime(time_t newTime);
+  //
+  // Display
+  //
+  // These default to doing nothing so a headless board is instantiable without
+  // a screen. Board320_240 overrides the ones it draws with; the rest are pure
+  // display bookkeeping that BoardCore calls unconditionally.
+  virtual void handleUiInput();
+  virtual void updateScreen();
+  virtual void displayMessage(const char *row1, const char *row2) { (void)row1; (void)row2; }
+  virtual void turnOffScreen() {}
+  virtual void setBrightness() {}
+  virtual void redrawScreen() {}
+  virtual void logDisplayHealth() {}
+  virtual void showMenu() {}
+  virtual void hideMenu() {}
+  virtual void otaUpdate() {}
+  virtual void showBootProgress(const char *step, const char *detail, uint16_t bgColor = 0) { (void)step; (void)detail; (void)bgColor; }
+  //
+  // Screen count drives the button-driven screen rotation. A headless board has
+  // no screens to rotate through, so 0 is meaningful here rather than a bug.
+  void setDisplayScreenCount(uint8_t count) { displayScreenCount = count; }
 };
