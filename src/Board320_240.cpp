@@ -57,643 +57,7 @@ So in summary, it initializes the core display and hardware functionality, retri
 #include "traccar.h"
 #include <esp_sntp.h>
 #include <PubSubClient.h>
-
-
-extern EvDashMobileRelay *mobileRelay;
-
-namespace
-{
-  volatile bool s_ntpSyncCompleted = false;
-
-  void sntpTimeSyncNotificationCallback(struct timeval *tv)
-  {
-    s_ntpSyncCompleted = true;
-  }
-
-  constexpr uint32_t kNetRetryIntervalSec = 30;
-  constexpr uint32_t kNtpPriorityWindowMs = 60000;
-  constexpr uint32_t kNtpRetryIntervalMs = 5000;
-  constexpr uint32_t kNetFailureStaleResetSec = 300;
-  constexpr uint32_t kNetFailureFallbackSec = 180;
-  constexpr uint16_t kNetFailureFallbackCount = 3;
-  constexpr uint32_t kWifiTransferIndicatorWindowMs = 2000;
-  constexpr size_t kAbrpPayloadBufferSize = 768;
-  constexpr size_t kAbrpFormBufferSize = 1536;
-  constexpr uint16_t kAbrpHttpsConnectTimeoutMs = 1000;
-  constexpr uint16_t kAbrpHttpsIoTimeoutMs = 2500;
-  constexpr uint32_t kTraccarIntervalMs = 5000;
-  constexpr float kGpsMaxSpeedKmh = 250.0f;
-  constexpr float kGpsJitterMeters = 200.0f;
-  constexpr float kGpsMaxJumpMetersShort = 2000.0f;
-  constexpr uint32_t kGpsShortJumpWindowSec = 5;
-  constexpr uint32_t kGpsReacquireAfterSecDefault = 900;
-  constexpr uint32_t kGpsReacquireAfterSecV21 = 120;
-  constexpr uint32_t kGpsFixFreshnessSec = 15;
-  constexpr float kGpsHeadingMinDistanceMeters = 3.0f;
-  constexpr float kContributeGpsCoordPrecision = 1000000.0f;
-  constexpr uint32_t kMotionWakeResetSec = 900;
-  constexpr uint32_t kChargingQueueHoldSec = 180;
-  constexpr time_t kLongParkingClearSec = 2 * 60 * 60;
-  constexpr uint16_t kSentryIdleSliceMs = 50;
-  constexpr uint8_t kGpsWakeConfirmSamples = 2;
-  constexpr uint8_t kGyroWakeConfirmSamples = 3;
-  constexpr size_t kContributeJsonDocCapacity = 12288;
-  constexpr uint8_t kContributeRawFrameUploadMax = 32;
-  constexpr bool kContributeIncludeRawLatency = false;
-  constexpr bool kContributeRetryOnceOnFail = false;
-  constexpr bool kContributeRawTlsFallbackOnTlsMem = true;
-  constexpr bool kContributeEnableTcpProbe = false;
-  constexpr bool kContributeHttpFallbackOnTlsMem = false;
-  constexpr uint16_t kContributeHttpsConnectTimeoutMs = 8000;
-  constexpr uint16_t kContributeHttpsIoTimeoutMs = 8000;
-  constexpr uint16_t kContributeHttpConnectTimeoutMs = 2000;
-  constexpr uint16_t kContributeHttpReadTimeoutMs = 3500;
-  constexpr size_t kContributeResponseBufferCap = 2048;
-  constexpr uint16_t kSdLogUploadConnectTimeoutMs = 4000;
-  constexpr uint16_t kSdLogUploadIoTimeoutMs = 4500;
-  constexpr uint16_t kSdLogUploadManualConnectTimeoutMs = 6000;
-  constexpr uint16_t kSdLogUploadManualIoTimeoutMs = 12000;
-  constexpr size_t kSdLogUploadChunkSize = 4096;
-  constexpr size_t kSdLogUploadManualChunkSize = 8192;
-  constexpr size_t kSdLogUploadBufferSize = kSdLogUploadManualChunkSize;
-  constexpr const char *kSdLogUploadBaseUrl = "https://api.evdash.eu/v1/upload";
-  uint8_t gSdLogUploadBuffer[kSdLogUploadBufferSize] = {0};
-  constexpr uint32_t kFirmwareVersionCheckCooldownMs = 30000;
-  constexpr uint16_t kFirmwareVersionHttpTimeoutMs = 4500;
-  constexpr uint32_t kPairStatusPollIntervalMs = 8000;
-  constexpr uint16_t kPairHttpTimeoutMs = 4500;
-  constexpr size_t kSdV2MaxFileBytes = 256U * 1024U;
-
-  // ABRP upload runs in the main loop, so avoid large temporary stack buffers here.
-  // These static buffers are only used from the single-threaded board loop path.
-  static char gAbrpPayloadBuffer[kAbrpPayloadBufferSize];
-  static char gAbrpEncodedPayloadBuffer[kAbrpFormBufferSize];
-  static char gAbrpFormBuffer[kAbrpFormBufferSize];
-
-  bool publishMqttFloat(PubSubClient &client, const char *baseTopic, const char *suffix, float value, uint8_t precision = 2, bool retain = false)
-  {
-    char topic[80];
-    char tmpVal[24];
-    int topicLen = snprintf(topic, sizeof(topic), "%s%s", baseTopic, suffix);
-    if (topicLen < 0 || topicLen >= static_cast<int>(sizeof(topic)))
-    {
-      return false;
-    }
-    dtostrf(value, 1, precision, tmpVal);
-    return client.publish(topic, tmpVal, retain);
-  }
-
-  bool publishMqttString(PubSubClient &client, const char *baseTopic, const char *suffix, const char *value, bool retain = false)
-  {
-    char topic[80];
-    int topicLen = snprintf(topic, sizeof(topic), "%s%s", baseTopic, suffix);
-    if (topicLen < 0 || topicLen >= static_cast<int>(sizeof(topic)))
-    {
-      return false;
-    }
-    return client.publish(topic, value, retain);
-  }
-
-  bool publishMqttInt(PubSubClient &client, const char *baseTopic, const char *suffix, int32_t value, bool retain = false)
-  {
-    char topic[80];
-    char tmpVal[16];
-    int topicLen = snprintf(topic, sizeof(topic), "%s%s", baseTopic, suffix);
-    if (topicLen < 0 || topicLen >= static_cast<int>(sizeof(topic)))
-    {
-      return false;
-    }
-    snprintf(tmpVal, sizeof(tmpVal), "%ld", static_cast<long>(value));
-    return client.publish(topic, tmpVal, retain);
-  }
-
-
-  struct HeapCapsJsonAllocator
-  {
-    void *allocate(size_t size)
-    {
-      void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-      if (ptr == nullptr)
-      {
-        ptr = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-      }
-      return ptr;
-    }
-
-    void deallocate(void *ptr)
-    {
-      free(ptr);
-    }
-
-    void *reallocate(void *ptr, size_t newSize)
-    {
-      void *newPtr = heap_caps_realloc(ptr, newSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-      if (newPtr == nullptr)
-      {
-        newPtr = heap_caps_realloc(ptr, newSize, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-      }
-      return newPtr;
-    }
-  };
-
-  using HeapCapsJsonDocument = BasicJsonDocument<HeapCapsJsonAllocator>;
-
-  bool isTlsMemoryIssue(int lastTlsErrCode, const String &lastTlsErrText)
-  {
-    String text = lastTlsErrText;
-    text.toLowerCase();
-    return lastTlsErrCode == MBEDTLS_ERR_X509_ALLOC_FAILED ||
-           lastTlsErrCode == -16 ||
-           text.indexOf("alloc") != -1;
-  }
-
-  char *allocContributePayloadBuffer(size_t payloadLen, bool &psramBuffer)
-  {
-    psramBuffer = false;
-    char *buffer = (char *)heap_caps_malloc(payloadLen + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (buffer != nullptr)
-    {
-      psramBuffer = true;
-      return buffer;
-    }
-    return (char *)heap_caps_malloc(payloadLen + 1, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  }
-
-  bool isMobileRelayClientConnected()
-  {
-    return mobileRelay != nullptr && mobileRelay->clientConnected();
-  }
-
-  size_t encodeQuotes(char *dest, size_t destSize, const char *source)
-  {
-    size_t written = 0;
-    while (*source != '\0')
-    {
-      if (*source == '"')
-      {
-        if (written + 3 >= destSize)
-        {
-          break;
-        }
-        dest[written++] = '%';
-        dest[written++] = '2';
-        dest[written++] = '2';
-      }
-      else
-      {
-        if (written + 1 >= destSize)
-        {
-          break;
-        }
-        dest[written++] = *source;
-      }
-      source++;
-    }
-    dest[written] = '\0';
-    return written;
-  }
-
-  bool isGpsCoordSane(float lat, float lon)
-  {
-    if (!isfinite(lat) || !isfinite(lon))
-    {
-      return false;
-    }
-    if (fabsf(lat) < 0.0001f || fabsf(lon) < 0.0001f)
-    {
-      return false;
-    }
-    if (lat < -90.0f || lat > 90.0f)
-    {
-      return false;
-    }
-    if (lon < -180.0f || lon > 180.0f)
-    {
-      return false;
-    }
-    return true;
-  }
-
-  float gpsDistanceMeters(float lat1, float lon1, float lat2, float lon2)
-  {
-    constexpr float kEarthRadiusMeters = 6371000.0f;
-    constexpr float kDegToRad = 0.017453292519943295f;
-    float dLat = (lat2 - lat1) * kDegToRad;
-    float dLon = (lon2 - lon1) * kDegToRad;
-    float lat1Rad = lat1 * kDegToRad;
-    float lat2Rad = lat2 * kDegToRad;
-    float sinLat = sinf(dLat * 0.5f);
-    float sinLon = sinf(dLon * 0.5f);
-    float a = (sinLat * sinLat) + (cosf(lat1Rad) * cosf(lat2Rad) * sinLon * sinLon);
-    float c = 2.0f * atan2f(sqrtf(a), sqrtf(1.0f - a));
-    return kEarthRadiusMeters * c;
-  }
-
-  bool isGpsFixUsable(const LiveData *liveData)
-  {
-    if (liveData == nullptr)
-    {
-      return false;
-    }
-    if (liveData->params.gpsLat == -1.0f || liveData->params.gpsLon == -1.0f)
-    {
-      return false;
-    }
-    if (!isGpsCoordSane(liveData->params.gpsLat, liveData->params.gpsLon))
-    {
-      return false;
-    }
-    if (liveData->params.gpsValid)
-    {
-      return true;
-    }
-
-    if (liveData->params.gpsLastFixTime > 0 &&
-        liveData->params.currentTime > 0 &&
-        liveData->params.currentTime >= liveData->params.gpsLastFixTime &&
-        static_cast<uint32_t>(liveData->params.currentTime - liveData->params.gpsLastFixTime) <= kGpsFixFreshnessSec)
-    {
-      return true;
-    }
-
-    if (liveData->params.gpsLastFixMs != 0)
-    {
-      const uint32_t nowMs = millis();
-      if ((nowMs - liveData->params.gpsLastFixMs) <= (kGpsFixFreshnessSec * 1000U))
-      {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  float roundToPrecision(float value, float multiplier)
-  {
-    if (!isfinite(value))
-    {
-      return value;
-    }
-    return roundf(value * multiplier) / multiplier;
-  }
-
-  String formatJsonNumber(float value, uint8_t digits)
-  {
-    if (!isfinite(value))
-    {
-      return "null";
-    }
-    return String(value, static_cast<unsigned int>(digits));
-  }
-
-  template <typename TJson>
-  void setJsonNumber(TJson &json, const char *key, float value, uint8_t digits)
-  {
-    if (!isfinite(value))
-    {
-      json[key] = nullptr;
-      return;
-    }
-    json[key] = serialized(formatJsonNumber(value, digits));
-  }
-
-  float normalizeHeadingDeg(float headingDeg)
-  {
-    if (!isfinite(headingDeg))
-    {
-      return -1.0f;
-    }
-    // Some GPS modules provide tenths without decimal point (e.g. 1715 => 171.5 deg).
-    if (headingDeg > 360.0f && headingDeg <= 3600.0f)
-    {
-      headingDeg /= 10.0f;
-    }
-    while (headingDeg < 0.0f)
-    {
-      headingDeg += 360.0f;
-    }
-    while (headingDeg >= 360.0f)
-    {
-      headingDeg -= 360.0f;
-    }
-    return headingDeg;
-  }
-
-  float gpsHeadingFromCoords(float lat1, float lon1, float lat2, float lon2)
-  {
-    constexpr float kDegToRad = 0.017453292519943295f;
-    constexpr float kRadToDeg = 57.29577951308232f;
-    float lat1Rad = lat1 * kDegToRad;
-    float lat2Rad = lat2 * kDegToRad;
-    float dLonRad = (lon2 - lon1) * kDegToRad;
-
-    float y = sinf(dLonRad) * cosf(lat2Rad);
-    float x = (cosf(lat1Rad) * sinf(lat2Rad)) - (sinf(lat1Rad) * cosf(lat2Rad) * cosf(dLonRad));
-
-    if (!isfinite(x) || !isfinite(y) || (fabsf(x) < 0.000001f && fabsf(y) < 0.000001f))
-    {
-      return -1.0f;
-    }
-
-    return normalizeHeadingDeg(atan2f(y, x) * kRadToDeg);
-  }
-
-  String formatTimestampYyMmDdHhIiSs(time_t timestamp)
-  {
-    if (timestamp <= 0)
-    {
-      return "";
-    }
-    struct tm tmValue;
-    if (localtime_r(&timestamp, &tmValue) == nullptr)
-    {
-      return "";
-    }
-    char out[16] = {0};
-    snprintf(out, sizeof(out), "%02d%02d%02d%02d%02d%02d",
-             (tmValue.tm_year + 1900) % 100,
-             tmValue.tm_mon + 1,
-             tmValue.tm_mday,
-             tmValue.tm_hour,
-             tmValue.tm_min,
-             tmValue.tm_sec);
-    return String(out);
-  }
-
-  String normalizeDeviceIdForApi(const String &deviceId)
-  {
-    String normalized = "";
-    normalized.reserve(deviceId.length());
-    for (size_t i = 0; i < deviceId.length(); i++)
-    {
-      const char ch = deviceId.charAt(i);
-      if (ch >= '0' && ch <= '9')
-      {
-        normalized += ch;
-      }
-      else if (ch >= 'A' && ch <= 'F')
-      {
-        normalized += ch;
-      }
-      else if (ch >= 'a' && ch <= 'f')
-      {
-        normalized += static_cast<char>(ch - ('a' - 'A'));
-      }
-    }
-    if (normalized.length() == 32)
-    {
-      return normalized;
-    }
-    return deviceId;
-  }
-
-  const char *getCompiledDeviceTypeForApi()
-  {
-#ifdef BOARD_M5STACK_CORES3
-    return "coreS3";
-#elif defined(BOARD_M5STACK_CORE2)
-    return "core2";
-#else
-    return "unknown";
-#endif
-  }
-
-  String toAbsoluteSdPath(const String &fileName)
-  {
-    if (fileName.length() == 0)
-    {
-      return "";
-    }
-    if (fileName.charAt(0) == '/')
-    {
-      return fileName;
-    }
-    return "/" + fileName;
-  }
-
-  bool isPendingSdV2LogFile(const String &filePath)
-  {
-    return filePath.endsWith("_v2.json") && !filePath.endsWith("_v2_uploaded.json");
-  }
-
-  bool isUploadedSdV2LogFile(const String &filePath)
-  {
-    return filePath.endsWith("_v2_uploaded.json");
-  }
-
-  String toUploadedSdV2Path(const String &pendingFilePath)
-  {
-    if (!isPendingSdV2LogFile(pendingFilePath))
-    {
-      return "";
-    }
-    return pendingFilePath.substring(0, pendingFilePath.length() - 8) + "_v2_uploaded.json";
-  }
-
-  bool parseSdLogYyMmDdHhMm(const String &filePath, time_t &outTs)
-  {
-    outTs = 0;
-    int slashPos = filePath.lastIndexOf('/');
-    String baseName = (slashPos >= 0) ? filePath.substring(slashPos + 1) : filePath;
-    if (baseName.length() < 10)
-    {
-      return false;
-    }
-    for (uint8_t i = 0; i < 10; i++)
-    {
-      const char ch = baseName.charAt(i);
-      if (ch < '0' || ch > '9')
-      {
-        return false;
-      }
-    }
-
-    const int year = 2000 + baseName.substring(0, 2).toInt();
-    const int month = baseName.substring(2, 4).toInt();
-    const int day = baseName.substring(4, 6).toInt();
-    const int hour = baseName.substring(6, 8).toInt();
-    const int minute = baseName.substring(8, 10).toInt();
-    if (month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59)
-    {
-      return false;
-    }
-
-    struct tm tmValue = {};
-    tmValue.tm_year = year - 1900;
-    tmValue.tm_mon = month - 1;
-    tmValue.tm_mday = day;
-    tmValue.tm_hour = hour;
-    tmValue.tm_min = minute;
-    tmValue.tm_sec = 0;
-
-    const time_t parsed = mktime(&tmValue);
-    if (parsed <= 0)
-    {
-      return false;
-    }
-    outTs = parsed;
-    return true;
-  }
-
-  bool isAllDigits(const String &value)
-  {
-    if (value.length() == 0)
-    {
-      return false;
-    }
-    for (uint16_t i = 0; i < value.length(); i++)
-    {
-      const char ch = value.charAt(i);
-      if (ch < '0' || ch > '9')
-      {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  String nextSdV2RolloverPath(const String &currentPath)
-  {
-    if (currentPath.length() == 0)
-    {
-      return "";
-    }
-
-    String baseName = currentPath;
-    if (baseName.charAt(0) == '/')
-    {
-      baseName = baseName.substring(1);
-    }
-    if (!baseName.endsWith("_v2.json"))
-    {
-      return "";
-    }
-
-    String stem = baseName.substring(0, baseName.length() - 8); // remove "_v2.json"
-    uint16_t nextSeq = 1;
-    const int sepPos = stem.lastIndexOf('_');
-    if (sepPos > 0 && sepPos < static_cast<int>(stem.length() - 1))
-    {
-      const String suffix = stem.substring(sepPos + 1);
-      if (isAllDigits(suffix))
-      {
-        nextSeq = static_cast<uint16_t>(suffix.toInt() + 1);
-        stem = stem.substring(0, sepPos);
-      }
-    }
-
-    if (stem.length() == 0)
-    {
-      stem = "log";
-    }
-
-    for (uint16_t seq = nextSeq; seq < 9999; seq++)
-    {
-      const String candidate = "/" + stem + "_" + String(seq) + "_v2.json";
-      if (!SD.exists(candidate.c_str()))
-      {
-        return candidate;
-      }
-    }
-    return "";
-  }
-
-  bool rotateSdV2FileIfNeeded(char *fileNameBuffer, size_t fileNameBufferSize, size_t pendingAppendBytes)
-  {
-    if (fileNameBuffer == nullptr || fileNameBufferSize == 0 || pendingAppendBytes == 0)
-    {
-      return false;
-    }
-
-    const String currentPath = toAbsoluteSdPath(String(fileNameBuffer));
-    if (!isPendingSdV2LogFile(currentPath))
-    {
-      return false;
-    }
-
-    size_t currentSize = 0;
-    File currentFile = SD.open(currentPath.c_str(), FILE_READ);
-    if (currentFile && !currentFile.isDirectory())
-    {
-      currentSize = static_cast<size_t>(currentFile.size());
-    }
-    if (currentFile)
-    {
-      currentFile.close();
-    }
-
-    if ((currentSize + pendingAppendBytes) <= kSdV2MaxFileBytes)
-    {
-      return false;
-    }
-
-    const String nextPath = nextSdV2RolloverPath(currentPath);
-    if (nextPath.length() == 0 || nextPath.length() >= fileNameBufferSize)
-    {
-      return false;
-    }
-
-    nextPath.toCharArray(fileNameBuffer, fileNameBufferSize);
-    return true;
-  }
-
-  bool hasContributeRawFrames(const LiveData *liveData)
-  {
-    if (liveData == nullptr)
-    {
-      return false;
-    }
-    for (uint8_t i = 0; i < liveData->contributeRawFrameCount; i++)
-    {
-      const LiveData::ContributeRawFrame &raw = liveData->contributeRawFrames[i];
-      if (raw.key[0] != '\0' && raw.value[0] != '\0')
-      {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool isContributeV2SnapshotEffectivelyEmpty(const LiveData *liveData)
-  {
-    if (liveData == nullptr)
-    {
-      return true;
-    }
-    if (liveData->params.getValidResponse)
-    {
-      return false;
-    }
-    if (isGpsFixUsable(liveData))
-    {
-      return false;
-    }
-    if (liveData->params.ignitionOn || liveData->params.chargingOn ||
-        liveData->params.chargerACconnected || liveData->params.chargerDCconnected)
-    {
-      return false;
-    }
-    if (hasContributeRawFrames(liveData))
-    {
-      return false;
-    }
-    if (liveData->params.socPerc >= 0 || liveData->params.sohPerc >= 0 ||
-        liveData->params.batPowerKw > -999.0f || liveData->params.batPowerKwh100 >= 0 ||
-        liveData->params.batVoltage >= 0 || liveData->params.batPowerAmp > -999.0f ||
-        liveData->params.auxVoltage >= 0 || liveData->params.auxCurrentAmp > -999.0f ||
-        liveData->params.batMinC > -100.0f || liveData->params.batMaxC > -100.0f ||
-        liveData->params.indoorTemperature > -100.0f || liveData->params.outdoorTemperature > -100.0f ||
-        liveData->params.speedKmh >= 0 || liveData->params.odoKm >= 0 ||
-        liveData->params.batCellMinV >= 0 || liveData->params.batCellMaxV >= 0 ||
-        liveData->params.batCellMinVNo != 255 ||
-        liveData->params.cumulativeEnergyChargedKWh >= 0 ||
-        liveData->params.cumulativeEnergyDischargedKWh >= 0)
-    {
-      return false;
-    }
-    return true;
-  }
-} // namespace
+#include "BoardShared.h"
 
 /**
    Bring up the SD/TF card over SPI.
@@ -863,20 +227,6 @@ void Board320_240::afterSetup()
     showBootProgress("Demo mode enabled", "Using static test data", TFT_YELLOW);
   }
 
-  // Wifi
-  // Starting Wifi after BLE prevents reboot loop
-  if (!liveData->params.wifiApMode &&
-      liveData->settings.wifiEnabled == 1)
-  {
-    showBootProgress("WiFi initialization...", "Connecting to configured AP", TFT_BLUE);
-    wifiSetup();
-    printHeapMemory();
-  }
-  else
-  {
-    showBootProgress("WiFi initialization...", "Skipped (disabled)", TFT_BLUE);
-  }
-
   // Init GPS
   if (liveData->settings.gpsModuleType != GPS_MODULE_TYPE_NONE && liveData->settings.gpsHwSerialPort <= 2)
   {
@@ -906,10 +256,28 @@ void Board320_240::afterSetup()
     showBootProgress("SD card initialization...", "Skipped (disabled)", TFT_ORANGE);
   }
 
-  // Init comm device
+  // Init comm device (BLE/BT) - MUST come before WiFi setup.
+  // On ESP32-S3 with NimBLE, starting WiFi before the BT controller is initialized
+  // causes coex_core_enable() to abort when BT later tries to join an already-WiFi-only
+  // coexistence context. BT must register with the coex module first.
   showBootProgress("Adapter initialization...", "Starting OBD2/CAN comm", TFT_SILVER);
   BoardInterface::afterSetup();
   printHeapMemory();
+
+  // WiFi - started AFTER BLE so both subsystems are registered with coex before either
+  // starts using RF. (Previous comment "Starting WiFi after BLE prevents reboot loop"
+  // was correct; this restores the intended order.)
+  if (!liveData->params.wifiApMode &&
+      liveData->settings.wifiEnabled == 1)
+  {
+    showBootProgress("WiFi initialization...", "Connecting to configured AP", TFT_BLUE);
+    wifiSetup();
+    printHeapMemory();
+  }
+  else
+  {
+    showBootProgress("WiFi initialization...", "Skipped (disabled)", TFT_BLUE);
+  }
 
   syslog->println("COMM in main loop (threading removed)");
   syslog->println("NET send in main loop (queue/task removed)");
@@ -1435,7 +803,7 @@ void Board320_240::printHeapMemory()
  * mainLoop runs ~1x/s, so without the latch only the last IMU sample of each
  * 1 s window was visible and short motion events were almost always missed.
  */
-void Board320_240::updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ, float accX, float accY, float accZ)
+void BoardCore::updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ, float accX, float accY, float accZ)
 {
   // IMU not ready yet (all axes zero): keep the previous state.
   if (gyroX == 0.0 && gyroY == 0.0 && gyroZ == 0.0 && accX == 0.0 && accY == 0.0 && accZ == 0.0)
@@ -1506,7 +874,7 @@ void Board320_240::boardLoop()
 {
 }
 
-void Board320_240::recordContributeSample()
+void BoardCore::recordContributeSample()
 {
   const time_t nowTime = liveData->params.currentTime;
   if (nowTime <= 0)
@@ -1566,7 +934,7 @@ void Board320_240::recordContributeSample()
   }
 }
 
-Board320_240::ContributeChargingEvent Board320_240::captureContributeChargingEventSnapshot(time_t eventTime) const
+Board320_240::ContributeChargingEvent BoardCore::captureContributeChargingEventSnapshot(time_t eventTime) const
 {
   ContributeChargingEvent event{};
   event.valid = true;
@@ -1584,7 +952,7 @@ Board320_240::ContributeChargingEvent Board320_240::captureContributeChargingEve
   return event;
 }
 
-void Board320_240::handleContributeChargingTransitions()
+void BoardCore::handleContributeChargingTransitions()
 {
   const time_t nowTime = liveData->params.currentTime;
   ContributeChargingEvent snapshot = captureContributeChargingEventSnapshot(nowTime);
@@ -1854,7 +1222,7 @@ bool Board320_240::buildContributePayloadV2(String &outJson, bool useReadableTsF
   return payloadLen > 0;
 }
 
-void Board320_240::syncContributeRelativeTimes(time_t offset)
+void BoardCore::syncContributeRelativeTimes(time_t offset)
 {
   if (offset == 0)
   {
@@ -2039,617 +1407,22 @@ void Board320_240::updateScreen()
 }
 
 /**
- * Main loop - primary thread
+ * Main loop - primary thread.
+ *
+ * The loop body is display-independent and now lives in BoardCore::mainLoop().
+ * All that remains here is the FPS counter, which feeds drawSceneDebug() on the
+ * debug screen; a board with no display has nothing to measure.
  */
 void Board320_240::mainLoop()
 {
-  // Calculate FPS
+  BoardCore::mainLoop();
+}
+
+void Board320_240::updateDisplayFps()
+{
   const uint32_t loopDurationMs = (millis() - mainLoopStart);
   displayFps = (loopDurationMs == 0 ? 0 : (1000.0f / loopDurationMs));
   mainLoopStart = millis();
-
-  // Serial console commands
-  processSerialConsole();
-
-  // board loop
-  boardLoop();
-
-  // Buttons, touch, menu
-  handleUiInput();
-
-  const bool allowGpsProcessing = !(liveData->params.stopCommandQueue && liveData->settings.voltmeterEnabled == 1);
-  if (allowGpsProcessing)
-  {
-    // GPS process
-    // Start timing
-    int64_t startTime4 = esp_timer_get_time();
-
-    if (gpsHwUart != NULL)
-    {
-      unsigned long start = millis();
-      if (gpsHwUart->available())
-      {
-        do
-        {
-          int ch = gpsHwUart->read();
-          if (ch != -1)
-            syslog->infoNolf(DEBUG_GPS, char(ch));
-          gps.encode(ch);
-        } while (gpsHwUart->available());
-        syncGPS();
-      }
-    }
-    else
-    {
-      // MEB CAR GPS
-      if (liveData->params.gpsValid && liveData->params.gpsLat != -1.0 && liveData->params.gpsLon != -1.0)
-        calcAutomaticBrightnessLatLon();
-    }
-    if (liveData->params.setGpsTimeFromCar != 0)
-    {
-      struct tm *tmm = gmtime(&liveData->params.setGpsTimeFromCar);
-      tmm->tm_isdst = 0;
-      setGpsTime(tmm->tm_year + 1900, tmm->tm_mon + 1, tmm->tm_mday, tmm->tm_hour, tmm->tm_min, tmm->tm_sec);
-      liveData->params.setGpsTimeFromCar = 0;
-    }
-
-    int64_t endTime4 = esp_timer_get_time();
-    // Calculate duration
-    int64_t duration4 = endTime4 - startTime4;
-
-    // Print the duration using syslog
-    // Use String constructor to convert int64_t to String
-    // syslog->println("Time taken by function: GPS loop " + String(duration4) + " microseconds");
-  }
-
-  // currentTime
-  struct tm now = cachedNow;
-  const uint32_t nowMs = millis();
-  if (lastTimeUpdateMs == 0 || (nowMs - lastTimeUpdateMs) >= 1000)
-  {
-    if (getLocalTime(&now, 0))
-    {
-      cachedNow = now;
-      cachedNowEpoch = mktime(&cachedNow);
-    }
-    else if (cachedNowEpoch != 0 && lastTimeUpdateMs != 0)
-    {
-      const uint32_t deltaSec = (nowMs - lastTimeUpdateMs) / 1000U;
-      if (deltaSec > 0)
-      {
-        cachedNowEpoch += deltaSec;
-        localtime_r(&cachedNowEpoch, &cachedNow);
-      }
-    }
-    if (cachedNowEpoch != 0)
-    {
-      liveData->params.currentTime = cachedNowEpoch;
-    }
-    else
-    {
-      // Fallback to uptime seconds when RTC/NTP/GPS time isn't available yet.
-      liveData->params.currentTime = nowMs / 1000U;
-    }
-    lastTimeUpdateMs = nowMs;
-  }
-
-  // Periodic automatic brightness recalculation (handles sunrise/sunset without new GPS fix)
-  if (liveData->settings.lcdBrightness == 0 &&
-      liveData->params.gpsLat != -1.0 &&
-      liveData->params.gpsLon != -1.0 &&
-      liveData->params.currentTime != 0)
-  {
-    static time_t lastAutoBrightnessCalc = 0;
-    const time_t nowTime = liveData->params.currentTime;
-    if (lastAutoBrightnessCalc == 0 || (nowTime - lastAutoBrightnessCalc) >= 60)
-    {
-      lastAutoBrightnessCalc = nowTime;
-      calcAutomaticBrightnessLatLon();
-    }
-  }
-
-  // Check and eventually reconnect WIFI connection
-  const bool wifiEnabled = (liveData->settings.wifiEnabled == 1);
-  const bool wifiConnected = (WiFi.status() == WL_CONNECTED);
-  if (wifiConnected)
-  {
-    liveData->params.wifiLastConnectedTime = liveData->params.currentTime;
-  }
-  if (wifiConnected && !lastWifiConnected)
-  {
-    checkFirmwareVersionOnServer();
-  }
-  lastWifiConnected = wifiConnected;
-
-  pollEvdashPairingStatus();
-
-  const bool allowWifiFallback = (!liveData->params.stopCommandQueue &&
-                                  !liveData->params.wifiApMode &&
-                                  wifiEnabled &&
-                                  liveData->settings.remoteUploadModuleType == REMOTE_UPLOAD_WIFI);
-  if (allowWifiFallback)
-  {
-    const bool disconnectedTooLong = (!wifiConnected &&
-                                      liveData->params.currentTime - liveData->params.wifiLastConnectedTime > 60);
-    const bool netFailedTooLong = (wifiConnected &&
-                                   liveData->params.netFailureStartTime != 0 &&
-                                   liveData->params.netFailureCount >= kNetFailureFallbackCount &&
-                                   (liveData->params.currentTime - liveData->params.netFailureStartTime) > kNetFailureFallbackSec);
-    if (disconnectedTooLong || netFailedTooLong)
-    {
-      wifiFallback();
-    }
-  }
-
-  // SIM800L, WiFI remote upload, ABRP remote upload, MQTT
-  netLoop();
-
-  // SD card recording
-  int64_t startTime5 = esp_timer_get_time();
-  const bool sdcardJsonV2 = true;
-  const bool sdcardWriteTick = sdcardJsonV2 ? true : liveData->params.sdcardCanNotify;
-  const bool sdcardHasPayload =
-      sdcardJsonV2 ? !isContributeV2SnapshotEffectivelyEmpty(liveData)
-                   : (liveData->params.odoKm != -1 && liveData->params.socPerc != -1);
-  if (!liveData->params.stopCommandQueue && liveData->params.sdcardInit && liveData->params.sdcardRecording && sdcardWriteTick &&
-      sdcardHasPayload)
-  {
-    const size_t sdcardFlushSize = 2048;
-    const uint32_t sdcardIntervalMs = static_cast<uint32_t>(liveData->settings.sdcardLogIntervalSec) * 1000U;
-    const char *sdcardOpFilenameFmt = sdcardJsonV2 ? "/%llu_v2.json" : "/%llu.json";
-    const char *sdcardGpsFilenameFmt = sdcardJsonV2 ? "/%y%m%d%H%M_v2.json" : "/%y%m%d%H%M.json";
-    const size_t sdcardGpsFilenameMinLength = sdcardJsonV2 ? 18 : 15;
-
-    // create filename
-    if (liveData->params.operationTimeSec > 0 && strlen(liveData->params.sdcardFilename) == 0)
-    {
-      sprintf(liveData->params.sdcardFilename, sdcardOpFilenameFmt, uint64_t(liveData->params.operationTimeSec / 60));
-      syslog->print("Log filename by opTimeSec: ");
-      syslog->println(liveData->params.sdcardFilename);
-    }
-    if (liveData->params.currTimeSyncWithGps && strlen(liveData->params.sdcardFilename) < sdcardGpsFilenameMinLength)
-    {
-      if (cachedNowEpoch == 0)
-      {
-        getLocalTime(&now, 0);
-      }
-      strftime(liveData->params.sdcardFilename, sizeof(liveData->params.sdcardFilename), sdcardGpsFilenameFmt, &now);
-      syslog->print("Log filename by GPS: ");
-      syslog->println(liveData->params.sdcardFilename);
-    }
-
-    // append buffer, clear buffer & notify state
-    if (strlen(liveData->params.sdcardFilename) != 0)
-    {
-      liveData->params.sdcardCanNotify = false;
-      if (sdcardJsonV2)
-      {
-        const bool minuteTick = (lastContributeSdRecordTime == 0) ||
-                                ((liveData->params.currentTime - lastContributeSdRecordTime) >= kContributeSampleWindowSec);
-        const bool contributeOnlineNow =
-            (liveData->settings.contributeData == 1) &&
-            (liveData->settings.remoteUploadModuleType == REMOTE_UPLOAD_WIFI) &&
-            (liveData->settings.wifiEnabled == 1) &&
-            (WiFi.status() == WL_CONNECTED) &&
-            liveData->params.netAvailable &&
-            !isMobileRelayClientConnected();
-        if (minuteTick && !contributeOnlineNow)
-        {
-          String jsonLine;
-          if (buildContributePayloadV2(jsonLine, true))
-          {
-            jsonLine += ",\n";
-            sdcardRecordBuffer += jsonLine;
-            lastContributeSdRecordTime = liveData->params.currentTime;
-          }
-        }
-      }
-      else
-      {
-        String jsonLine;
-        serializeParamsToJson(jsonLine);
-        jsonLine += ",\n";
-        sdcardRecordBuffer += jsonLine;
-      }
-
-      const bool timeToFlush = (sdcardIntervalMs > 0U) && ((nowMs - liveData->params.sdcardLastFlushMs) >= sdcardIntervalMs);
-      const bool sizeToFlush = sdcardRecordBuffer.length() >= sdcardFlushSize;
-      if ((timeToFlush || sizeToFlush) && sdcardRecordBuffer.length() > 0)
-      {
-        if (sdcardJsonV2 &&
-            rotateSdV2FileIfNeeded(liveData->params.sdcardFilename,
-                                   sizeof(liveData->params.sdcardFilename),
-                                   sdcardRecordBuffer.length()))
-        {
-          syslog->print("SD v2 rollover file: ");
-          syslog->println(liveData->params.sdcardFilename);
-        }
-
-        File file = SD.open(liveData->params.sdcardFilename, FILE_APPEND);
-        if (!file)
-        {
-          syslog->println("Failed to open file for appending");
-          file = SD.open(liveData->params.sdcardFilename, FILE_WRITE);
-        }
-        if (!file)
-        {
-          syslog->println("Failed to create file");
-        }
-        if (file)
-        {
-          syslog->info(DEBUG_SDCARD, "Save buffer to SD card");
-          file.print(sdcardRecordBuffer);
-          file.close();
-          sdcardRecordBuffer = "";
-          liveData->params.sdcardLastFlushMs = nowMs;
-        }
-      }
-    }
-  }
-
-  int64_t endTime5 = esp_timer_get_time();
-
-  // Calculate duration
-  int64_t duration5 = endTime5 - startTime5;
-
-  // Print the duration using syslog
-  // Use String constructor to convert int64_t to String
-  // syslog->println("Time taken by function: SD card write loop " + String(duration5) + " microseconds");
-
-  // Read voltmeter INA3221 (if enabled)
-  if (liveData->settings.voltmeterEnabled == 1 && liveData->params.currentTime - liveData->params.lastVoltageReadTime > 5)
-  {
-    liveData->params.auxVoltage = ina3221.getBusVoltage_V(1);
-    liveData->params.lastVoltageReadTime = liveData->params.currentTime;
-    if (liveData->params.auxVoltage > liveData->settings.voltmeterSleep)
-    {
-      liveData->params.lastVoltageOkTime = liveData->params.currentTime;
-    }
-
-    // Protect AUX battery in screen only mode
-    if (liveData->settings.sleepModeLevel == SLEEP_MODE_SCREEN_ONLY &&
-        liveData->params.auxVoltage > 5 && liveData->params.auxVoltage < liveData->settings.voltmeterCutOff)
-    {
-      syslog->print("AUX voltage under cut-off voltage: ");
-      syslog->println(liveData->settings.voltmeterCutOff);
-      shutdownDevice();
-    }
-
-    // Calculate AUX perc for ioniq2018
-    if (liveData->settings.carType == CAR_HYUNDAI_IONIQ_2018)
-    {
-      float tmpAuxPerc = (float)(liveData->params.auxVoltage - 11.6) * 100 / (float)(12.8 - 11.6); // min 11.6V; max: 12.8V
-      liveData->params.auxPerc = ((tmpAuxPerc > 100) ? 100 : ((tmpAuxPerc < 0) ? 0 : tmpAuxPerc));
-    }
-  }
-
-  const bool recentlyCharging =
-      (liveData->params.lastChargingOnTime != 0 &&
-       liveData->params.currentTime >= liveData->params.lastChargingOnTime &&
-       (liveData->params.currentTime - liveData->params.lastChargingOnTime) <= kChargingQueueHoldSec);
-  const bool chargingActiveForQueue =
-      (liveData->params.chargingOn ||
-       liveData->params.chargerACconnected ||
-       liveData->params.chargerDCconnected ||
-       recentlyCharging);
-
-  // Reset sentry session when car becomes active
-  if (liveData->params.ignitionOn || chargingActiveForQueue)
-  {
-    if (liveData->params.sentrySessionActive)
-    {
-      liveData->params.sentrySessionActive = false;
-      liveData->params.motionWakeLocked = false;
-      liveData->params.gpsWakeCount = 0;
-      liveData->params.gyroWakeCount = 0;
-      liveData->params.motionWakeLastTime = 0;
-    }
-  }
-
-  // Wake up from stopped command queue
-  //  - ignitions on and aux >= 11.5v
-  //  - ina3221 & voltage is >= 14V (DCDC is running)
-  //  - gps speed >= 5kmh & 4+ satellites (only when voltmeter is disabled)
-  //  - gyro motion (only when voltmeter is disabled)
-  const bool queueStopped = liveData->params.stopCommandQueue;
-  const bool queueSleeping = (queueStopped || liveData->params.stopCommandQueueTime != 0);
-  const bool allowMotionWake = (liveData->settings.voltmeterEnabled == 0);
-  static uint8_t gpsWakeConfirmCount = 0;
-  static uint8_t gyroWakeConfirmCount = 0;
-
-  if (!queueStopped)
-  {
-    gpsWakeConfirmCount = 0;
-    gyroWakeConfirmCount = 0;
-
-    // Charging started while autostop was preparing: cancel pending stop timer.
-    if (liveData->params.stopCommandQueueTime != 0 && chargingActiveForQueue)
-    {
-      liveData->continueWithCommandQueue();
-    }
-  }
-
-  if (queueSleeping)
-  {
-    if (liveData->params.motionWakeLastTime == 0)
-    {
-      liveData->params.motionWakeLastTime = liveData->params.currentTime;
-    }
-    else if (liveData->params.currentTime - liveData->params.motionWakeLastTime >= kMotionWakeResetSec)
-    {
-      liveData->params.gpsWakeCount = 0;
-      liveData->params.gyroWakeCount = 0;
-      liveData->params.motionWakeLocked = false;
-      liveData->params.motionWakeLastTime = liveData->params.currentTime;
-    }
-  }
-  const uint16_t maxGpsWakePerSession = 1;
-  const uint16_t maxGyroWakePerSession = 5;
-  const bool gpsWakeRemaining = (liveData->params.gpsWakeCount < maxGpsWakePerSession);
-  const bool gyroWakeRemaining = (liveData->params.gyroWakeCount < maxGyroWakePerSession);
-  const bool motionWakeLocked = (!gpsWakeRemaining && !gyroWakeRemaining);
-  liveData->params.motionWakeLocked = motionWakeLocked;
-  const bool motionWakeAllowed = allowMotionWake && !motionWakeLocked;
-  const bool gpsWakeCandidate =
-      motionWakeAllowed && gpsWakeRemaining &&
-      (liveData->params.gpsValid && liveData->params.speedKmhGPS >= 5 && liveData->params.gpsSat >= 4); // 5 floor parking house, satelites 5 & gps speed = 274kmh :/
-  const bool gyroWakeCandidate = motionWakeAllowed && gyroWakeRemaining && liveData->params.gyroSensorMotion;
-  // Consume the motion latch: each pass then answers "any motion since the last
-  // check", so all ~20 IMU samples of a Sentry idle window count, not just the last.
-  liveData->params.gyroSensorMotion = false;
-
-  if (queueStopped && gpsWakeCandidate)
-  {
-    if (gpsWakeConfirmCount < kGpsWakeConfirmSamples)
-      gpsWakeConfirmCount++;
-  }
-  else
-  {
-    gpsWakeConfirmCount = 0;
-  }
-
-  if (queueStopped && gyroWakeCandidate)
-  {
-    if (gyroWakeConfirmCount < kGyroWakeConfirmSamples)
-      gyroWakeConfirmCount++;
-  }
-  else if (!queueStopped)
-  {
-    gyroWakeConfirmCount = 0;
-  }
-  else if (gyroWakeConfirmCount > 0)
-  {
-    // Decay instead of hard reset: real driving over speed bumps or stop-and-go
-    // produces intermittent motion windows; a single quiet second must not throw
-    // away the whole confirmation streak, or the wake never accumulates.
-    gyroWakeConfirmCount--;
-  }
-
-  const bool gpsWake = queueStopped && (gpsWakeConfirmCount >= kGpsWakeConfirmSamples);
-  const bool gyroWake = queueStopped && (gyroWakeConfirmCount >= kGyroWakeConfirmSamples);
-  const bool motionWake = gpsWake || gyroWake;
-  if (queueStopped &&
-      ((liveData->params.ignitionOn && (liveData->params.auxVoltage <= 3 || liveData->params.auxVoltage >= 11.5)) ||
-       chargingActiveForQueue ||
-       (liveData->settings.voltmeterEnabled == 1 && liveData->params.auxVoltage > 14.0) ||
-       motionWake))
-  {
-    if (motionWake)
-    {
-      if (gpsWake)
-      {
-        liveData->params.gpsWakeCount++;
-      }
-      if (gyroWake)
-      {
-        liveData->params.gyroWakeCount++;
-      }
-      liveData->params.motionWakeLastTime = liveData->params.currentTime;
-      liveData->params.motionWakeLocked =
-          (liveData->params.gpsWakeCount >= maxGpsWakePerSession &&
-           liveData->params.gyroWakeCount >= maxGyroWakePerSession);
-    }
-    gpsWakeConfirmCount = 0;
-    gyroWakeConfirmCount = 0;
-    liveData->continueWithCommandQueue();
-    if (commInterface->isSuspended())
-    {
-      commInterface->resumeDevice();
-    }
-
-    // Some APs drop ESP32 station during prolonged Sentry inactivity.
-    // Force a reconnect immediately after wake so recovery does not require reboot.
-    const bool shouldReconnectWifiAfterWake =
-        (!liveData->params.wifiApMode &&
-         liveData->settings.wifiEnabled == 1 &&
-         WiFi.status() != WL_CONNECTED);
-    if (shouldReconnectWifiAfterWake)
-    {
-      syslog->println("Sentry wake: WiFi disconnected, forcing reconnect.");
-      WiFi.enableSTA(true);
-      WiFi.mode(WIFI_STA);
-
-      if (liveData->params.wifiActiveIndex > 0)
-      {
-        wifiSwitchToIndex(liveData->params.wifiActiveIndex);
-      }
-      else
-      {
-        wifiSwitchToMain();
-      }
-    }
-  }
-  // Stop command queue
-  //  - automatically turns off CAN scanning after 1-2 minutes of inactivity
-  //  - ignition is off
-  //  - AUX voltage is under 11.5V
-  const time_t doorStateStaleAfterSec = 15;
-  const bool doorStateStale = (liveData->params.currentTime - liveData->params.lastCanbusResponseTime > doorStateStaleAfterSec);
-  const bool doorsClosed = (!liveData->params.leftFrontDoorOpen &&
-                            !liveData->params.rightFrontDoorOpen &&
-                            !liveData->params.trunkDoorOpen);
-  const bool doorsOk = (doorsClosed || doorStateStale);
-  const bool parkingLikely =
-      (!liveData->params.ignitionOn &&
-       !chargingActiveForQueue &&
-       doorsOk);
-  const bool lowAuxVoltage = (!chargingActiveForQueue &&
-                              liveData->params.auxVoltage > 3 &&
-                              liveData->params.auxVoltage < 11.5);
-  const bool autoStopByCanSignals = (parkingLikely || lowAuxVoltage);
-  const bool longParkingCandidate =
-      (liveData->params.currentTime != 0 &&
-       !chargingActiveForQueue &&
-       !liveData->params.forwardDriveMode &&
-       !liveData->params.reverseDriveMode &&
-       (liveData->params.stopCommandQueueTime != 0 ||
-        liveData->params.stopCommandQueue ||
-        liveData->params.parkModeOrNeutral));
-
-  if (longParkingCandidate)
-  {
-    if (liveData->params.parkedModeStartTime == 0)
-    {
-      liveData->params.parkedModeStartTime = liveData->params.currentTime;
-    }
-    else if (!liveData->params.clearDrivingStatsOnNextDrive &&
-             liveData->params.currentTime - liveData->params.parkedModeStartTime >= kLongParkingClearSec)
-    {
-      liveData->params.clearDrivingStatsOnNextDrive = true;
-    }
-  }
-  else if (chargingActiveForQueue)
-  {
-    liveData->params.parkedModeStartTime = 0;
-    liveData->params.clearDrivingStatsOnNextDrive = false;
-  }
-  else if (!liveData->params.clearDrivingStatsOnNextDrive &&
-           (liveData->params.forwardDriveMode || liveData->params.reverseDriveMode))
-  {
-    liveData->params.parkedModeStartTime = 0;
-  }
-
-  // Fallback when CAN never yields a valid response (e.g. adapter/config issue):
-  // still allow Sentry autostop after a grace period so AUX battery is protected.
-  const time_t autoStopWithoutCanGraceSec = 180;
-  const bool canDataMissingTooLong =
-      (!liveData->params.getValidResponse &&
-       (liveData->params.currentTime - liveData->params.wakeUpTime > autoStopWithoutCanGraceSec));
-  const bool dcDcLikelyRunning = (liveData->params.auxVoltage >= 13.8);
-  const bool autoStopFallbackSafe = (parkingLikely && !dcDcLikelyRunning);
-
-  if (liveData->settings.commandQueueAutoStop == 1 &&
-      ((liveData->params.getValidResponse && autoStopByCanSignals) ||
-       (canDataMissingTooLong && autoStopFallbackSafe)))
-  {
-    if (canDataMissingTooLong && !liveData->params.getValidResponse && liveData->params.stopCommandQueueTime == 0)
-    {
-      syslog->println("Sentry fallback: no valid CAN data, preparing autostop.");
-    }
-    liveData->prepareForStopCommandQueue();
-  }
-  if (!liveData->params.stopCommandQueue &&
-      !chargingActiveForQueue &&
-      ((liveData->params.stopCommandQueueTime != 0 && liveData->params.currentTime - liveData->params.stopCommandQueueTime > 60) ||
-       (liveData->params.auxVoltage > 3 && liveData->params.auxVoltage < 11.0)))
-  {
-    liveData->params.stopCommandQueue = true;
-    commInterface->suspendDevice();
-    syslog->println("CAN Command queue stopped...");
-  }
-  updateGpsV21PpsMode();
-
-  // Descrease loop fps
-  if (liveData->params.stopCommandQueue)
-  {
-    const uint32_t idleWaitStartMs = millis();
-    while (liveData->params.stopCommandQueue && (millis() - idleWaitStartMs) < 1000UL)
-    {
-      processSerialConsole();
-      delay(kSentryIdleSliceMs);
-      boardLoop();
-
-      // Keep Sentry low-power pacing, but poll wake inputs often enough so touch wake feels immediate.
-      isButtonPressed(pinButtonMiddle);
-      if (!liveData->params.stopCommandQueue)
-        break;
-      isButtonPressed(pinButtonLeft);
-      if (!liveData->params.stopCommandQueue)
-        break;
-      isButtonPressed(pinButtonRight);
-    }
-  }
-
-  // Display sleep, brightness and redraw
-  updateScreen();
-
-  // Read data from BLE/CAN
-  commLoop();
-
-  // Calculating avg.speed and time in forward mode
-  if (liveData->params.odoKm != -1 && forwardDriveOdoKmLast == -1)
-  {
-    forwardDriveOdoKmLast = liveData->params.odoKm;
-  }
-  if (liveData->params.forwardDriveMode != lastForwardDriveMode)
-  {
-    if (liveData->params.forwardDriveMode)
-    {
-      if (forwardDriveOdoKmStart != -1 ||
-          (liveData->params.odoKm != -1 && forwardDriveOdoKmLast != -1 && liveData->params.odoKm != forwardDriveOdoKmLast))
-      {
-        if (forwardDriveOdoKmStart == -1)
-          forwardDriveOdoKmStart = liveData->params.odoKm;
-        lastForwardDriveModeStart = liveData->params.currentTime;
-        lastForwardDriveMode = liveData->params.forwardDriveMode;
-      }
-    }
-    else
-    {
-      if (lastForwardDriveModeStart != 0)
-      {
-        previousForwardDriveModeTotal = previousForwardDriveModeTotal + (liveData->params.currentTime - lastForwardDriveModeStart);
-        lastForwardDriveModeStart = 0;
-      }
-      lastForwardDriveMode = liveData->params.forwardDriveMode;
-    }
-  }
-  liveData->params.timeInForwardDriveMode = previousForwardDriveModeTotal +
-                                            (lastForwardDriveModeStart == 0 ? 0 : liveData->params.currentTime - lastForwardDriveModeStart);
-  if (liveData->params.odoKm != -1 && forwardDriveOdoKmLast != -1 && liveData->params.odoKm != forwardDriveOdoKmLast && liveData->params.timeInForwardDriveMode > 0)
-  {
-    forwardDriveOdoKmLast = liveData->params.odoKm;
-    liveData->params.avgSpeedKmh = /*(double)*/ (liveData->params.odoKm - forwardDriveOdoKmStart) /
-                                   (/*(double)*/ liveData->params.timeInForwardDriveMode / 3600.0);
-  }
-
-  // Automatic reset charging data or clear drive stats after charging / long parking transition.
-  if (liveData->params.chargingOn && !lastChargingOn)
-  {
-    liveData->params.chargingStartTime = liveData->params.currentTime;
-  }
-  handleContributeChargingTransitions();
-  lastChargingOn = liveData->params.chargingOn;
-  recordContributeSample();
-
-  if (liveData->params.chargingOn && liveData->params.carMode != CAR_MODE_CHARGING)
-  {
-    liveData->clearDrivingAndChargingStats(CAR_MODE_CHARGING);
-  }
-  else if ((liveData->params.clearDrivingStatsOnNextDrive &&
-            liveData->params.forwardDriveMode) ||
-           (liveData->params.forwardDriveMode &&
-            (liveData->params.speedKmh > 15 || (liveData->params.speedKmhGPS > 15 && liveData->params.gpsSat >= 4)) &&
-            liveData->params.carMode != CAR_MODE_DRIVE))
-  {
-    liveData->clearDrivingAndChargingStats(CAR_MODE_DRIVE);
-  }
-  /*else if (!liveData->params.chargingOn && !liveData->params.forwardDriveMode && liveData->params.carMode != CAR_MODE_NONE &&
-           (!(liveData->params.speedKmh > 15 || (liveData->params.speedKmhGPS > 15 && liveData->params.gpsSat >= 4))) && liveData->params.currentTime - liveData->params.carModeChanged > 1800 &&
-           liveData->params.currentTime - liveData->params.carModeChanged < 10 * 24 * 3600)
-  {
-    liveData->clearDrivingAndChargingStats(CAR_MODE_NONE);
-  }*/
 }
 
 /**
@@ -2658,7 +1431,7 @@ void Board320_240::mainLoop()
  * sets the system time using settimeofday(), and syncs other times.
  * Also sets the time on the M5Stack Core2 RTC module if being used.
  */
-void Board320_240::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds)
+void BoardCore::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds)
 {
   liveData->params.currTimeSyncWithGps = true;
 
@@ -2685,7 +1458,7 @@ void Board320_240::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t
  * offset between the old current time and new current time, and adjusts
  * each timestamp variable by that offset.
  */
-void Board320_240::syncTimes(time_t newTime)
+void BoardCore::syncTimes(time_t newTime)
 {
   const time_t offset = newTime - liveData->params.currentTime;
   time_t *timeParams[] = {
@@ -3190,7 +1963,7 @@ void Board320_240::stopSdcardConsoleLog()
  * This function updates GPS-related parameters such as latitude, longitude,
  * altitude, satellite count, speed, and time synchronization if valid data is received.
  */
-void Board320_240::syncGPS()
+void BoardCore::syncGPS()
 {
   if (gps.satellites.isValid())
   {
@@ -3378,7 +2151,7 @@ static bool isWifiSsidConfigured(const char *ssid)
  *
  * @return True if WiFi initialization and connection succeeded, false otherwise.
  */
-bool Board320_240::wifiSetup()
+bool BoardCore::wifiSetup()
 {
   liveData->params.wifiActiveIndex = 0;
   liveData->params.isWifiBackupLive = false;
@@ -3386,13 +2159,18 @@ bool Board320_240::wifiSetup()
   syslog->print("Initializing WiFi with SSID: ");
   syslog->println(liveData->settings.wifiSsid);
 
-  // Enable Station mode and start connection
+  // Enable Station mode and start connection.
+  // NOTE: Do NOT call WiFi.setSleep(false) here — ESP-IDF requires modem sleep to be
+  // enabled when both WiFi and Bluetooth are active. Disabling it triggers an abort():
+  // "Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled".
   WiFi.enableSTA(true);
+  WiFi.setAutoReconnect(true);
   WiFi.mode(WIFI_STA);
   WiFi.begin(liveData->settings.wifiSsid, liveData->settings.wifiPassword);
 
   // Update the last connected time
   liveData->params.wifiLastConnectedTime = liveData->params.currentTime;
+  liveData->params.wifiConnectAttemptStartMs = millis();
 
   return true;
 }
@@ -3402,7 +2180,7 @@ bool Board320_240::wifiSetup()
  *
  * Disconnects from the current WiFi network and attempts connection to the next configured AP.
  */
-void Board320_240::wifiFallback()
+void BoardCore::wifiFallback()
 {
   disconnectMqtt(false);
   WiFi.disconnect(false, false);
@@ -3465,7 +2243,7 @@ void Board320_240::wifiFallback()
 /**
  * Switches to a specific WiFi network index (0=main, 1=ssid2, 2=ssid3, 3=ssid4).
  */
-void Board320_240::wifiSwitchToIndex(uint8_t index)
+void BoardCore::wifiSwitchToIndex(uint8_t index)
 {
   const char *ssid = "";
   const char *password = "";
@@ -3522,12 +2300,13 @@ void Board320_240::wifiSwitchToIndex(uint8_t index)
 
   WiFi.begin(ssid, password);
   liveData->params.wifiLastConnectedTime = liveData->params.currentTime;
+  liveData->params.wifiConnectAttemptStartMs = millis();
 }
 
 /**
  * Switches to the backup WiFi network (index 1).
  */
-void Board320_240::wifiSwitchToBackup()
+void BoardCore::wifiSwitchToBackup()
 {
   wifiSwitchToIndex(1);
 }
@@ -3535,7 +2314,7 @@ void Board320_240::wifiSwitchToBackup()
 /**
  * Restores the main WiFi connection (index 0).
  */
-void Board320_240::wifiSwitchToMain()
+void BoardCore::wifiSwitchToMain()
 {
   wifiSwitchToIndex(0);
 }
@@ -4182,7 +2961,7 @@ void Board320_240::dismissCanStatusMessage()
   }
 }
 
-bool Board320_240::netStatusMessageVisible() const
+bool BoardCore::netStatusMessageVisible() const
 {
   if (liveData->params.netAvailable)
     return false;
@@ -4197,7 +2976,7 @@ bool Board320_240::netStatusMessageVisible() const
   return true;
 }
 
-bool Board320_240::isContributeKeyValid(const char *key) const
+bool BoardCore::isContributeKeyValid(const char *key) const
 {
   if (key == nullptr)
     return false;
@@ -4219,7 +2998,7 @@ bool Board320_240::isContributeKeyValid(const char *key) const
   return true;
 }
 
-String Board320_240::ensureContributeKey()
+String BoardCore::ensureContributeKey()
 {
   String key = String(liveData->settings.contributeToken);
   key.trim();
@@ -4241,7 +3020,7 @@ String Board320_240::ensureContributeKey()
   return key;
 }
 
-String Board320_240::getHardwareDeviceId() const
+String BoardCore::getHardwareDeviceId() const
 {
   const uint64_t efuse = (ESP.getEfuseMac() & 0xFFFFFFFFFFFFULL);
   const uint32_t uuidPart1 = static_cast<uint32_t>((efuse >> 16) & 0xFFFFFFFFULL);
@@ -4296,7 +3075,7 @@ String getTraccarDeviceIdFromEfuse()
   return String(deviceId);
 }
 
-String Board320_240::getPairDeviceId() const
+String BoardCore::getPairDeviceId() const
 {
   const String hardwareDeviceId = normalizeDeviceIdForApi(getHardwareDeviceId());
   if (hardwareDeviceId.length() == 0)
@@ -4306,7 +3085,7 @@ String Board320_240::getPairDeviceId() const
   return hardwareDeviceId;
 }
 
-bool Board320_240::requestPairingStart(String &outCode, uint32_t &outExpiresInSec)
+bool BoardCore::requestPairingStart(String &outCode, uint32_t &outExpiresInSec)
 {
   outCode = "";
   outExpiresInSec = 0;
@@ -4405,7 +3184,7 @@ bool Board320_240::requestPairingStart(String &outCode, uint32_t &outExpiresInSe
   return true;
 }
 
-uint8_t Board320_240::requestPairingStatus(const String &pairCode, String &outCarName)
+uint8_t BoardCore::requestPairingStatus(const String &pairCode, String &outCarName)
 {
   outCarName = "";
 
@@ -4506,7 +3285,7 @@ uint8_t Board320_240::requestPairingStatus(const String &pairCode, String &outCa
   return 255;
 }
 
-void Board320_240::startEvdashPairing()
+void BoardCore::startEvdashPairing()
 {
   if (WiFi.status() != WL_CONNECTED || liveData->settings.wifiEnabled != 1)
   {
@@ -4542,7 +3321,7 @@ void Board320_240::startEvdashPairing()
   displayMessage("Open evdash.eu", "Settings / cars -> pair", row3.c_str());
 }
 
-void Board320_240::pollEvdashPairingStatus()
+void BoardCore::pollEvdashPairingStatus()
 {
   if (pairPendingCode[0] == '\0')
   {
@@ -4615,7 +3394,7 @@ void Board320_240::pollEvdashPairingStatus()
   pairLastKnownState = state;
 }
 
-int Board320_240::compareVersionTags(const String &left, const String &right) const
+int BoardCore::compareVersionTags(const String &left, const String &right) const
 {
   const auto parse = [](const String &input, int out[4]) -> bool
   {
@@ -4701,7 +3480,7 @@ int Board320_240::compareVersionTags(const String &left, const String &right) co
   return 0;
 }
 
-void Board320_240::checkFirmwareVersionOnServer()
+void BoardCore::checkFirmwareVersionOnServer()
 {
   const uint32_t nowMs = millis();
   if (lastFirmwareVersionCheckMs != 0 &&
@@ -4864,7 +3643,7 @@ void Board320_240::checkFirmwareVersionOnServer()
   delay(1800);
 }
 
-void Board320_240::addWifiTransferredBytes(size_t bytes)
+void BoardCore::addWifiTransferredBytes(size_t bytes)
 {
   if (bytes == 0)
   {
@@ -4892,7 +3671,7 @@ void Board320_240::addWifiTransferredBytes(size_t bytes)
   wifiTransferredBytes += static_cast<uint32_t>(bytes);
 }
 
-void Board320_240::updateNetAvailability(bool success)
+void BoardCore::updateNetAvailability(bool success)
 {
   if (success)
   {
@@ -4917,7 +3696,7 @@ void Board320_240::updateNetAvailability(bool success)
   }
 }
 
-bool Board320_240::ensureMqttConnected()
+bool BoardCore::ensureMqttConnected()
 {
   if (liveData->settings.mqttEnabled != 1)
   {
@@ -5067,7 +3846,7 @@ void Board320_240::disconnectMqtt(bool sendOfflineStatus)
   }
 }
 
-void Board320_240::publishHaSensor(const char *component, const char *objectId, const char *name,
+void BoardCore::publishHaSensor(const char *component, const char *objectId, const char *name,
                                    const char *deviceClass, const char *unit, const char *stateClass,
                                    const char *entityCategory, const char *payloadOn, const char *payloadOff)
 {
@@ -5167,7 +3946,7 @@ void Board320_240::publishHaSensor(const char *component, const char *objectId, 
   }
 }
 
-void Board320_240::publishHomeAssistantDiscovery()
+void BoardCore::publishHomeAssistantDiscovery()
 {
   if (mqttClient == nullptr || !mqttClient->connected())
   {
@@ -5254,7 +4033,7 @@ void Board320_240::publishHomeAssistantDiscovery()
  * Checks if WiFi is connected, syncs NTP if needed, sends data to remote API if interval elapsed,
  * sends data to ABRP if interval elapsed, contributes data if enabled.
  */
-void Board320_240::netLoop()
+void BoardCore::netLoop()
 {
   if (liveData->params.wifiApMode)
   {
@@ -5826,7 +4605,7 @@ bool Board320_240::netSendData(bool sendAbrp)
         HTTPClient http;
 
         http.begin(wClient, liveData->settings.remoteApiUrl);
-        http.setConnectTimeout(500);
+        http.setConnectTimeout(2000);
         http.addHeader("Content-Type", "application/json");
         addWifiTransferredBytes(payloadLen);
         rc = http.POST(payload);
@@ -6031,7 +4810,7 @@ bool Board320_240::netSendData(bool sendAbrp)
   return true;
 }
 
-void Board320_240::queueAbrpSdLog(const char *payload, size_t length, time_t currentTime, uint64_t operationTimeSec, bool timeSyncWithGps)
+void BoardCore::queueAbrpSdLog(const char *payload, size_t length, time_t currentTime, uint64_t operationTimeSec, bool timeSyncWithGps)
 {
   if (payload == nullptr || length == 0)
   {
@@ -6092,7 +4871,7 @@ void Board320_240::queueAbrpSdLog(const char *payload, size_t length, time_t cur
  * Receives a contribute token if successful.
  * Only called for M5Stack Core2 boards.
  **/
-bool Board320_240::netContributeData()
+bool BoardCore::netContributeData()
 {
   int rc = 0;
 
@@ -6101,7 +4880,7 @@ bool Board320_240::netContributeData()
   return true;
 }
 
-void Board320_240::runSdV2BackgroundTasks(bool netReady)
+void BoardCore::runSdV2BackgroundTasks(bool netReady)
 {
   const uint32_t nowMs = millis();
 
@@ -6163,7 +4942,7 @@ void Board320_240::runSdV2BackgroundTasks(bool netReady)
   }
 }
 
-bool Board320_240::ensureSdV2UploadFileSelected(const String &activeLogFilename)
+bool BoardCore::ensureSdV2UploadFileSelected(const String &activeLogFilename)
 {
   if (sdV2UploadFilePath.length() > 0 && sdV2UploadFileName.length() > 0)
   {
@@ -6219,7 +4998,7 @@ bool Board320_240::ensureSdV2UploadFileSelected(const String &activeLogFilename)
   return true;
 }
 
-bool Board320_240::processSdV2UploadChunk()
+bool BoardCore::processSdV2UploadChunk()
 {
   if (sdV2UploadFilePath.length() == 0 || sdV2UploadFileName.length() == 0)
   {
@@ -6295,7 +5074,7 @@ bool Board320_240::processSdV2UploadChunk()
   return true;
 }
 
-void Board320_240::resetSdV2UploadState()
+void BoardCore::resetSdV2UploadState()
 {
   sdV2UploadFilePath = "";
   sdV2UploadFileName = "";
@@ -6303,7 +5082,7 @@ void Board320_240::resetSdV2UploadState()
   sdV2UploadOffset = 0;
 }
 
-bool Board320_240::postSdLogChunkToEvDash(const String &fileName, uint32_t part, const uint8_t *data, size_t length, String *responsePayload, int *responseCode, bool preferManualTimeouts)
+bool BoardCore::postSdLogChunkToEvDash(const String &fileName, uint32_t part, const uint8_t *data, size_t length, String *responsePayload, int *responseCode, bool preferManualTimeouts)
 {
   if (responsePayload != nullptr)
   {
@@ -6441,7 +5220,7 @@ bool Board320_240::postSdLogChunkToEvDash(const String &fileName, uint32_t part,
   return (statusOk && !storedFalse);
 }
 
-bool Board320_240::cleanupUploadedSdV2Logs()
+bool BoardCore::cleanupUploadedSdV2Logs()
 {
   if (!liveData->params.sdcardInit)
   {
@@ -6535,7 +5314,7 @@ bool Board320_240::cleanupUploadedSdV2Logs()
  * Sends configuration commands to the GPS module to enable desired sentences,
  * set update rate, enable SBAS, and configure navigation model.
  */
-void Board320_240::initGPS()
+void BoardCore::initGPS()
 {
   syslog->print("GPS initialization on hwUart: ");
   syslog->println(liveData->settings.gpsHwSerialPort);
@@ -6773,7 +5552,7 @@ void Board320_240::initGPS()
 /**
  * Send CASIC binary command to GPS module.
  */
-void Board320_240::sendCasicGpsCommand(uint8_t msgClass, uint8_t msgId, const uint8_t *payload, uint16_t payloadLen)
+void BoardCore::sendCasicGpsCommand(uint8_t msgClass, uint8_t msgId, const uint8_t *payload, uint16_t payloadLen)
 {
   if (gpsHwUart == NULL || payload == NULL || payloadLen > 48 || (payloadLen % 4) != 0)
   {
@@ -6813,7 +5592,7 @@ void Board320_240::sendCasicGpsCommand(uint8_t msgClass, uint8_t msgId, const ui
 /**
  * Enable or disable GPS v2.1 PPS output.
  */
-void Board320_240::setGpsV21Pps(bool enabled)
+void BoardCore::setGpsV21Pps(bool enabled)
 {
   if (liveData->settings.gpsModuleType != GPS_MODULE_TYPE_GPS_V21_GNSS || gpsHwUart == NULL ||
       (gpsV21PpsModeKnown && gpsV21PpsEnabled == enabled))
@@ -6837,7 +5616,7 @@ void Board320_240::setGpsV21Pps(bool enabled)
 /**
  * Sync GPS v2.1 PPS output with Sentry/suspend state.
  */
-void Board320_240::updateGpsV21PpsMode()
+void BoardCore::updateGpsV21PpsMode()
 {
   if (liveData->settings.gpsModuleType == GPS_MODULE_TYPE_GPS_V21_GNSS)
   {
@@ -6848,7 +5627,7 @@ void Board320_240::updateGpsV21PpsMode()
 /**
  * This function uploads log files from the SD card to the EvDash server.
  */
-void Board320_240::uploadSdCardLogToEvDashServer(bool silent)
+void BoardCore::uploadSdCardLogToEvDashServer(bool silent)
 {
   if (!silent)
   {
