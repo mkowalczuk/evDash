@@ -8,6 +8,15 @@ void BoardCore::handleUiInput()
 }
 
 /**
+ * Default storage bring-up: no card interface on this board, so mounting fails
+ * rather than pretending to succeed. A board with a slot overrides this.
+ */
+bool BoardCore::sdBegin()
+{
+  return false;
+}
+
+/**
  * Default screen update: nothing to draw without a display.
  */
 void BoardCore::updateScreen()
