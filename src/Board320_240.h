@@ -5,7 +5,6 @@
 #include "BoardCore.h"
 #include <SD.h>
 #include <SPI.h>
-#include "SDL_Arduino_INA3221.h"
 
 #ifdef BOARD_M5STACK_CORE2
 #include <M5Core2.h>
@@ -56,9 +55,6 @@ protected:
   void releaseMenuBackbuffer();
   void sprDrawString(const char *string, int32_t poX, int32_t poY);
   void tftDrawStringFont7(const char *string, int32_t poX, int32_t poY);
-  HardwareSerial *gpsHwUart = NULL;
-  SDL_Arduino_INA3221 ina3221;
-  TinyGPSPlus gps;
   char tmpStr1[64];
   char tmpStr2[20];
   char tmpStr3[20];
@@ -73,153 +69,8 @@ protected:
   uint16_t batteryCellsPage = 0;
   uint8_t debugInfoPage = 0;
   time_t lastRedrawTime = 0;
-  uint8_t currentBrightness = 255;
-  // time in fwd mode for avg speed calc.
-  time_t previousForwardDriveModeTotal = 0;
-  time_t lastForwardDriveModeStart = 0;
-  bool lastForwardDriveMode = false;
-  float forwardDriveOdoKmStart = -1;
-  float forwardDriveOdoKmLast = -1;
-  uint32_t mainLoopStart = 0;
-  uint32_t lastTimeUpdateMs = 0;
-  uint32_t suppressTouchInputUntilMs = 0;
-  bool keyboardInputActive = false;
-  bool messageDialogVisible = false;
-  time_t cachedNowEpoch = 0;
-  struct tm cachedNow = {};
-  float displayFps = 0;
-  bool modalDialogActive = false;
-  static constexpr time_t kMenuAutoHideTimeoutSec = 60;
-  bool screenSwipePreviewActive = false;
-  String dismissedCanStatusText = "";
-  time_t dismissedNetFailureTime = 0;
-  bool lastChargingOn = false;
-  uint32_t lastNetSendDurationMs = 0;
-  uint32_t lastRemoteSendAtMs = 0;
-  uint32_t lastAbrpSendAtMs = 0;
-  uint32_t lastTraccarSendAtMs = 0;
-  WiFiClient *mqttPlainClient = nullptr;
-  WiFiClientSecure *mqttSecureClient = nullptr;
-  PubSubClient *mqttClient = nullptr;
-  uint32_t lastMqttReconnectAttemptMs = 0;
-  static constexpr uint32_t kMqttReconnectBackoffMs = 15000;
-  bool ensureMqttConnected();
-  void publishHomeAssistantDiscovery();
-  void publishHaSensor(const char *component, const char *objectId, const char *name,
-                       const char *deviceClass, const char *unit, const char *stateClass,
-                       const char *entityCategory = nullptr, const char *payloadOn = nullptr, const char *payloadOff = nullptr);
-  uint32_t wifiTransferredBytes = 0;
-  uint32_t wifiTransferLastActivityMs = 0;
-  uint32_t lastFirmwareVersionCheckMs = 0;
-  bool lastWifiConnected = false;
-  uint32_t ntpAttemptStartMs = 0;
-  uint32_t ntpLastAttemptMs = 0;
-  bool gpsTimeFallbackAllowed = false;
-  bool gpsV21PpsModeKnown = false;
-  bool gpsV21PpsEnabled = false;
-  String lastNotifiedFirmwareVersion = "";
-  char pairPendingCode[7] = {0};
-  time_t pairPendingExpiresAt = 0;
-  uint32_t pairLastStatusPollMs = 0;
-  uint8_t pairLastKnownState = 0; // 0-none, 1-pending, 2-paired, 3-expired
-  static constexpr uint8_t kContributeSampleSlots = 12;
-  static constexpr time_t kContributeSampleIntervalSec = 5;
-  static constexpr time_t kContributeSampleWindowSec = 60;
-  static constexpr uint32_t kContributeCycleIntervalMs = static_cast<uint32_t>(kContributeSampleWindowSec) * 1000U;
-  static constexpr uint32_t kContributeWaitFallbackMs = 4000;
-  struct ContributeMotionSample
-  {
-    time_t time = 0;
-    bool hasGpsFix = false;
-    float lat = -1.0f;
-    float lon = -1.0f;
-    float speedKmh = -1.0f;
-    float headingDeg = -1.0f;
-    float cellMinV = -1.0f;
-    float cellMaxV = -1.0f;
-    uint8_t cellMinNo = 255;
-  };
-  struct ContributeChargingSample
-  {
-    time_t time = 0;
-    float soc = -1.0f;
-    float batV = -1.0f;
-    float batA = -1000.0f;
-    float powKw = -1000.0f;
-  };
-  struct ContributeChargingEvent
-  {
-    bool valid = false;
-    time_t time = 0;
-    float soc = -1.0f;
-    float batV = -1.0f;
-    float batA = -1000.0f;
-    float cellMinV = -1.0f;
-    float cellMaxV = -1.0f;
-    uint8_t cellMinNo = 255;
-    float batMinC = -100.0f;
-    float batMaxC = -100.0f;
-    float cecKWh = -1.0f;
-    float cedKWh = -1.0f;
-  };
-  ContributeMotionSample contributeMotionSamples[kContributeSampleSlots] = {};
-  ContributeChargingSample contributeChargingSamples[kContributeSampleSlots] = {};
-  uint8_t contributeMotionSampleCount = 0;
-  uint8_t contributeMotionSampleNext = 0;
-  uint8_t contributeChargingSampleCount = 0;
-  uint8_t contributeChargingSampleNext = 0;
-  time_t lastContributeSampleTime = 0;
-  time_t lastContributeSdRecordTime = 0;
-  uint32_t contributeStatusSinceMs = 0;
-  uint32_t nextContributeCycleAtMs = 0;
-  static constexpr uint32_t kSdV2BackgroundUploadIntervalMs = 5000U;
-  static constexpr uint32_t kSdV2BackgroundStartDelayMs = 5U * 60U * 1000U;
-  static constexpr uint32_t kSdV2BackgroundRetryBackoffMs = 60U * 60U * 1000U;
-  static constexpr uint32_t kSdV2CleanupIntervalMs = 6U * 60U * 60U * 1000U;
-  static constexpr time_t kSdV2UploadedRetentionSec = 30 * 24 * 60 * 60;
-  uint32_t nextSdV2BackgroundUploadAtMs = 0;
-  uint32_t sdV2BackgroundStartAtMs = 0;
-  uint32_t nextSdV2CleanupAtMs = 0;
-  String sdV2UploadFilePath = "";
-  String sdV2UploadFileName = "";
-  uint32_t sdV2UploadPart = 0;
-  uint32_t sdV2UploadOffset = 0;
-  ContributeChargingEvent contributeLastBeforeCharge = {};
-  ContributeChargingEvent contributeLastDuringCharge = {};
-  ContributeChargingEvent contributeChargingStartEvent = {};
-  ContributeChargingEvent contributeChargingEndEvent = {};
-  void updateNetAvailability(bool success);
-  bool netStatusMessageVisible() const;
-  bool isContributeKeyValid(const char *key) const;
-  String ensureContributeKey();
-  String getHardwareDeviceId() const;
-  String getPairDeviceId() const;
-  int compareVersionTags(const String &left, const String &right) const;
-  void checkFirmwareVersionOnServer();
-  bool requestPairingStart(String &outCode, uint32_t &outExpiresInSec);
-  uint8_t requestPairingStatus(const String &pairCode, String &outCarName);
-  void startEvdashPairing();
-  void pollEvdashPairingStatus();
-  void addWifiTransferredBytes(size_t bytes);
-  void recordContributeSample();
-  ContributeChargingEvent captureContributeChargingEventSnapshot(time_t eventTime) const;
-  void handleContributeChargingTransitions();
-  void syncContributeRelativeTimes(time_t offset);
-  void runSdV2BackgroundTasks(bool netReady);
-  bool ensureSdV2UploadFileSelected(const String &activeLogFilename);
-  bool processSdV2UploadChunk();
-  void resetSdV2UploadState();
-  bool postSdLogChunkToEvDash(const String &fileName, uint32_t part, const uint8_t *data, size_t length, String *responsePayload = nullptr, int *responseCode = nullptr, bool preferManualTimeouts = false);
-  bool cleanupUploadedSdV2Logs();
-  void sendCasicGpsCommand(uint8_t msgClass, uint8_t msgId, const uint8_t *payload, uint16_t payloadLen);
-  void setGpsV21Pps(bool enabled);
-  void updateGpsV21PpsMode();
-  void updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ, float accX, float accY, float accZ);
 
 public:
-  byte pinButtonLeft = 0;
-  byte pinButtonRight = 0;
-  byte pinButtonMiddle = 0;
   byte pinSpeaker = 0;
   byte pinBrightness = 0;
   byte pinSdcardCs = 0;
@@ -253,23 +104,9 @@ public:
   void handleWebLogView(WebServer &server);
   void handleWebLogDelete(WebServer &server);
   // GPS
-  void initGPS();
-  void syncGPS();
-  void syncTimes(time_t newTime);
-  void setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds);
-  // Notwork
-  bool wifiSetup();
-  void netLoop();
   bool netSendData(bool sendAbrp) override;
   void disconnectMqtt(bool sendOfflineStatus = false) override;
-  bool netContributeData();
   bool buildContributePayloadV2(String &outJson, bool useReadableTsForSd = false) override;
-  void wifiFallback();
-  void wifiSwitchToMain();
-  void wifiSwitchToBackup();
-  void wifiSwitchToIndex(uint8_t index);
-  void uploadSdCardLogToEvDashServer(bool silent = false);
-  void queueAbrpSdLog(const char *payload, size_t length, time_t currentTime, uint64_t operationTimeSec, bool timeSyncWithGps);
   bool wifiScanToMenu();
   bool promptKeyboard(const char *title, String &value, bool mask, uint8_t maxLen = 63);
   bool promptWifiPassword(const char *ssid, String &outPassword, bool isOpenNetwork);
@@ -282,6 +119,7 @@ public:
   // Extracted from mainLoop(): display work a displayless board skips entirely.
   void handleUiInput() override;
   void updateScreen() override;
+  void updateDisplayFps() override;
   void turnOffScreen() override;
   void setBrightness() override;
   void displayMessage(const char *row1, const char *row2) override;
