@@ -2,7 +2,7 @@
 
 //
 #include <TinyGPS++.h>
-#include "BoardInterface.h"
+#include "BoardCore.h"
 #include <SD.h>
 #include <SPI.h>
 #include "SDL_Arduino_INA3221.h"
@@ -32,7 +32,7 @@ class PubSubClient;
 class WiFiClient;
 class WiFiClientSecure;
 
-class Board320_240 : public BoardInterface
+class Board320_240 : public BoardCore
 {
 
 protected:
@@ -229,6 +229,10 @@ public:
   //
   void initBoard() override;
   void afterSetup() override;
+  // RTC - both M5 boards have a battery-backed clock; see BoardCore for the
+  // display-free defaults used by boards that do not.
+  time_t rtcReadTime() override;
+  void rtcWriteTime(time_t newTime) override;
   void commLoop() override;
   void boardLoop() override;
   void mainLoop() override;
