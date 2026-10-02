@@ -1,6 +1,8 @@
 #pragma once
 
 #include "BoardCore.h"
+#include <SD_MMC.h>
+#include <SPI.h>
 
 /**
  * Waveshare ESP32-S3-SIM7670G-4G, run headless.
@@ -32,6 +34,7 @@ class BoardWaveshareSim7670g : public BoardCore
 public:
   const char *hardwareModelName() override { return "Sim7670G"; }
   uint8_t hardwareIdTag() const override { return 0x04U; }
+  bool sdBegin() override;
   void initBoard() override;
   void commLoop() override;
   void boardLoop() override;

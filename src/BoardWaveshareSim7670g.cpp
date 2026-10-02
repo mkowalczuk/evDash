@@ -104,4 +104,14 @@ bool BoardWaveshareSim7670g::modemBegin()
   }
   return modemReady;
 }
+bool BoardWaveshareSim7670g::sdBegin()
+{
+  // SDMMC on ESP32-S3: CLK 5, CMD 4, DATA 6 (1-bit mode by default)
+  if (!SD_MMC.setPins(SDMMC_CLK_PIN, SDMMC_CMD_PIN, SDMMC_DATA_PIN))
+  {
+    return false;
+  }
+  return SD_MMC.begin("/sdcard", false);
+}
+
 #endif // BOARD_WAVESHARE_SIM7670G
