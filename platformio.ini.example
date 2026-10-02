@@ -5,6 +5,16 @@ platform = espressif32 @ 6.4.0
 framework = arduino
 upload_protocol = esptool
 monitor_speed = 115200
+; Board-specific translation units are excluded from the environments that do
+; not use them, so they are not compile targets there (rather than relying on
+; in-file #ifdef guards). Each env below selects one of these groups.
+;   Waveshare-only: the SIM7670G modem board, its GNSS driver and the onboard
+;     WS2812B status LED (the last pulls in Adafruit NeoPixel, a Waveshare-only
+;     dependency).
+;   M5-only: the 320x240 display stack (screen/menu/OTA/webserver) and the two
+;     M5 board adapters, which pull in the M5 display libraries.
+src_filter_m5 = +<*> -<BoardWaveshareSim7670g.cpp> -<Sim7670G.cpp> -<StatusLed.cpp>
+src_filter_waveshare = +<*> -<Board320_240.cpp> -<Board320_240_display.cpp> -<Board320_240_menu.cpp> -<Board320_240_ota.cpp> -<Board320_240_ui.cpp> -<Board320_240_webserver.cpp> -<BoardM5stackCore2.cpp> -<BoardM5stackCoreS3.cpp>
 build_flags =
 ;	-D RESET_SETTINGS
 	-D BOARD_HAS_PSRAM
@@ -18,6 +28,12 @@ lib_deps =
 	https://github.com/coryjfowler/MCP_CAN_lib
 	https://github.com/nickn17/Solarlib
 	knolleary/PubSubClient@^2.8
+
+; Applies to every environment unless overridden. Three of the four envs are
+; M5 boards, so default to the M5 filter (excludes the Waveshare-only files);
+; the Waveshare env overrides this with its own filter when it is added.
+[env]
+build_src_filter = ${common.src_filter_m5}
 
 [core2]
 board = m5stack-core2

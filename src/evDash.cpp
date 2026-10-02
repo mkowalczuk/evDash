@@ -43,6 +43,10 @@
 #include "BoardM5stackCoreS3.h"
 #endif // BOARD_M5STACK_CORES3
 
+#ifdef BOARD_WAVESHARE_SIM7670G
+#include "BoardWaveshareSim7670g.h"
+#endif // BOARD_WAVESHARE_SIM7670G
+
 #include "LogSerial.h"
 #include "LiveData.h"
 #include "CarInterface.h"
@@ -136,6 +140,10 @@ void setup(void)
 #ifdef BOARD_M5STACK_CORES3
   board = new BoardM5stackCoreS3();
 #endif // BOARD_M5STACK_CORES3
+
+#ifdef BOARD_WAVESHARE_SIM7670G
+  board = new BoardWaveshareSim7670g();
+#endif // BOARD_WAVESHARE_SIM7670G
 
   board->setLiveData(liveData);
   board->loadSettings();
