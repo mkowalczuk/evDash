@@ -120,6 +120,12 @@ bool BoardWaveshareSim7670g::modemBegin()
   if (modemReady)
   {
     syslog->println("SIM7670G: AT UART responding");
+    // Enable GNSS over AT per plan (iteration 2.4)
+    modemSendCommand("AT+CGNSSPWR=1", 1000);
+    delay(50);
+    modemSendCommand("AT+CGNSSTST=1", 1000);
+    delay(50);
+    modemSendCommand("AT+CGNSSPORTSWITCH=0,1", 1000);
   }
   else
   {
