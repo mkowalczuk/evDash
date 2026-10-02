@@ -78,23 +78,31 @@ bool BoardWaveshareSim7670g::modemSendCommand(const char *command, uint32_t time
       const char ch = (char)modemUart->read();
       if (ch == '\r' || ch == '\n')
       {
-        // A bare OK is the whole answer to a bare AT.
-        if (reply.endsWith("OK"))
+        if (reply.endsWith("OK") || reply.indexOf("OK") >= 0)
         {
           return true;
+        }
+        if (reply.indexOf("ERROR") >= 0 || reply.indexOf("FAIL") >= 0)
+        {
+          return false;
+        }
+        if (reply.length() > 0)
+        {
+          reply.clear();
         }
         continue;
       }
       reply += ch;
-      if (reply.length() > 128)
+      if (reply.length() > 256)
       {
-        reply.remove(0, reply.length() - 128);
+        reply.remove(0, reply.length() - 256);
       }
     }
     delay(10);
   }
-  return reply.endsWith("OK");
+  return reply.indexOf("OK") >= 0;
 }
+
 
 bool BoardWaveshareSim7670g::modemBegin()
 {
