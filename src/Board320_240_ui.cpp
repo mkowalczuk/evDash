@@ -1,3 +1,9 @@
+
+// This file is display-only: it draws on a 320x240 panel and reads touch and
+// buttons. A headless board has no screen, so it is not compiled at all there.
+// Everything display-independent lives in BoardCore.cpp.
+#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+
 /**
  * Board 320x240 UI primitives
  *
@@ -566,3 +572,4 @@ void Board320_240::showTires(int32_t x, int32_t y, int32_t w, int32_t h, const c
   posy = (y * 60) + 14;
   sprDrawString(bottomright, posx, posy);
 }
+#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3

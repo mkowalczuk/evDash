@@ -62,7 +62,7 @@ public:
   // Byte mixed into the efuse-derived device UUID. It has to differ per board,
   // otherwise a device that changes hardware keeps claiming the previous one's
   // identity on the server. M5 Core2 keeps the original 0x02, CoreS3 0x03.
-  virtual uint8_t hardwareIdTag() { return 0x02; }
+  virtual uint8_t hardwareIdTag() const { return 0x02; }
 
   //
   // Clock

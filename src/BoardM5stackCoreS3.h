@@ -26,4 +26,6 @@ public:
   void setTime(String timestamp) override;
   void ntpSync() override;
   void syncRtcFromSystemTime() override;
+  const char *hardwareModelName() override { return "CoreS3"; }
+  uint8_t hardwareIdTag() const override { return 0x03U; }
 };
