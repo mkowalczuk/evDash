@@ -3,6 +3,11 @@
 #include "BoardInterface.h"
 #include "Board320_240.h"
 #include "BoardM5stackCoreS3.h"
+
+// An M5Stack-specific board adapter. A headless build does not use it, and it
+// pulls in the M5 display stack, so it is not compiled there.
+#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+
 #include <time.h>
 // #include "I2C_MPU6886.h"
 
@@ -699,3 +704,4 @@ void BoardM5stackCoreS3::syncRtcFromSystemTime()
 }
 
 #endif // BOARD_M5STACK_CORES3
+#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3
