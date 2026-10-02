@@ -2,6 +2,7 @@
 #include "BoardWaveshareSim7670g.h"
 #include "LogSerial.h"
 #include "config.h"
+#include <Wire.h>
 
 // SIM7670G AT UART on UART1. The pins come from config.h, which takes them
 // from platformio.ini or falls back to the carrier's documented wiring.
@@ -21,6 +22,20 @@ void BoardWaveshareSim7670g::initBoard()
   seedSystemClock();
 
   modemBegin();
+
+  if (liveData->settings.voltmeterEnabled == 1)
+  {
+    Wire.begin(BAT_SDA_PIN, BAT_SCL_PIN);
+    if (max17048.begin(Wire))
+    {
+      syslog->println("MAX17048 initialized");
+    }
+    else
+    {
+      syslog->println("MAX17048 not found");
+    }
+  }
+
 
   // WiFi is the upload path for this board until the modem is wired up.
   if (!liveData->params.wifiApMode && liveData->settings.wifiEnabled == 1)

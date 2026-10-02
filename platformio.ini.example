@@ -70,6 +70,7 @@ lib_deps =
 	m5stack/M5Unified
 	m5stack/M5GFX
 	h2zero/NimBLE-Arduino@^1.4.3
+	sparkfun/SparkFun MAX1704x Fuel Gauge Arduino Library@^1.0.4
 	${common.lib_deps}
 ; Keep the bundled Bluedroid "BLE" library out of the link so only NimBLE provides BLE.
 lib_ignore = BLE, SimpleBLE
@@ -166,6 +167,7 @@ build_flags =
 	-D CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=8192
 lib_deps =
 	h2zero/NimBLE-Arduino@^1.4.3
+	sparkfun/SparkFun MAX1704x Fuel Gauge Arduino Library@^1.0.4
 	${common.lib_deps}
 ; Keep the bundled Bluedroid "BLE" library out of the link so only NimBLE provides BLE.
 lib_ignore = BLE, SimpleBLE

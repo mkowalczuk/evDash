@@ -3,6 +3,8 @@
 #include "BoardCore.h"
 #include <SD_MMC.h>
 #include <SPI.h>
+#include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
+
 
 /**
  * Waveshare ESP32-S3-SIM7670G-4G, run headless.
@@ -53,4 +55,5 @@ private:
   // implemented they are separate objects.
   HardwareSerial *modemUart = nullptr;
   bool modemReady = false;
+  SFE_MAX1704X max17048;
 };
