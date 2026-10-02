@@ -366,3 +366,51 @@ typedef struct
   char title[MENU_ITEM_TITLE_LEN];
   char obdMacAddress[MENU_ITEM_OBD_MAC_LEN];
 } MENU_ITEM;
+
+#ifdef BOARD_WAVESHARE_SIM7670G
+//
+// Waveshare ESP32-S3-SIM7670G-4G carrier wiring.
+//
+// Taken from the V2 schematic and the vendor's ESP-IDF demos, which agree on
+// all of them. Each is overridable from platformio.ini for a carrier wired
+// differently.
+//
+// The LCD on this board is an external ST7789 on a header and is not fitted,
+// so nothing here is a display pin. The camera FPC claims GPIO7-16, 39, 41, 42
+// and 46; those are left unallocated rather than reused.
+//
+#ifndef SIM7670G_RX_PIN
+#define SIM7670G_RX_PIN 17 // ESP32 RX <- SIM7670G TX
+#endif
+#ifndef SIM7670G_TX_PIN
+#define SIM7670G_TX_PIN 18 // ESP32 TX -> SIM7670G RX
+#endif
+#ifndef LOG_SERIAL_RX_PIN
+#define LOG_SERIAL_RX_PIN 10 // CH343 debug UART
+#endif
+#ifndef LOG_SERIAL_TX_PIN
+#define LOG_SERIAL_TX_PIN 11
+#endif
+#ifndef BAT_SDA_PIN
+#define BAT_SDA_PIN 15 // MAX17048 fuel gauge
+#endif
+#ifndef BAT_SCL_PIN
+#define BAT_SCL_PIN 16
+#endif
+#ifndef SDMMC_CLK_PIN
+#define SDMMC_CLK_PIN 5 // TF card on SDMMC
+#endif
+#ifndef SDMMC_CMD_PIN
+#define SDMMC_CMD_PIN 4
+#endif
+#ifndef SDMMC_DATA_PIN
+#define SDMMC_DATA_PIN 6
+#endif
+#ifndef SD_CARDDETECT_PIN
+#define SD_CARDDETECT_PIN 46
+#endif
+#ifndef WS2812B_PIN
+#define WS2812B_PIN 38 // on-board RGB LED, unused for now
+#endif
+#endif // BOARD_WAVESHARE_SIM7670G
+

@@ -1,3 +1,9 @@
+
+// This file is display-only: it draws on a 320x240 panel and reads touch and
+// buttons. A headless board has no screen, so it is not compiled at all there.
+// Everything display-independent lives in BoardCore.cpp.
+#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+
 /**
  * evDash Web Log Server
  *
@@ -606,3 +612,4 @@ void Board320_240::runWebLogServer()
   displayMessage("Web Log Server", "Server stopped");
   delay(800);
 }
+#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3

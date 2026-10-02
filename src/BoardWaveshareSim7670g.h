@@ -14,12 +14,15 @@
  * does not implement keeps the no-op default declared there, so this class only
  * has to describe what is genuinely different about the hardware.
  *
- * Pin assignments come from the V2 schematic and the vendor's ESP-IDF demos,
- * which agree on all of them:
+ * The pin assignments live in config.h, taken from the V2 schematic and the
+ * vendor's ESP-IDF demos, which agree on all of them:
  *   SIM7670G AT UART  RX GPIO17, TX GPIO18, UART1, 115200 8N1
  *   TF card (SDMMC)   CLK GPIO5, CMD GPIO4, DATA GPIO6, card detect GPIO46
  *   MAX17048 gauge    SDA GPIO15, SCL GPIO16
  *   WS2812B RGB       GPIO38 (unused for now)
+ *
+ * Each is overridable from platformio.ini, so a differently wired carrier needs
+ * no code change.
  *
  * The modem's power rail is switched by a DIP switch on the carrier, not by an
  * ESP32 GPIO, so there is no enable pin to drive here.
@@ -28,7 +31,7 @@ class BoardWaveshareSim7670g : public BoardCore
 {
 public:
   const char *hardwareModelName() override { return "Sim7670G"; }
-  uint8_t hardwareIdTag() override { return 0x04U; }
+  uint8_t hardwareIdTag() const override { return 0x04U; }
   void initBoard() override;
   void commLoop() override;
   void boardLoop() override;

@@ -1,9 +1,12 @@
+#ifdef BOARD_WAVESHARE_SIM7670G
 #include "BoardWaveshareSim7670g.h"
 #include "LogSerial.h"
+#include "config.h"
 
-// SIM7670G AT UART, fixed by the carrier: ESP32 RX on GPIO17, TX on GPIO18.
-static constexpr int kModemRxPin = 17;
-static constexpr int kModemTxPin = 18;
+// SIM7670G AT UART on UART1. The pins come from config.h, which takes them
+// from platformio.ini or falls back to the carrier's documented wiring.
+static constexpr int kModemRxPin = SIM7670G_RX_PIN;
+static constexpr int kModemTxPin = SIM7670G_TX_PIN;
 static constexpr int kModemBaud = 115200;
 static constexpr uint8_t kModemUartNum = 1;
 
@@ -101,3 +104,4 @@ bool BoardWaveshareSim7670g::modemBegin()
   }
   return modemReady;
 }
+#endif // BOARD_WAVESHARE_SIM7670G

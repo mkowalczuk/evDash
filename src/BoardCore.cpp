@@ -4,6 +4,8 @@
 #include "CarModelUtils.h"
 #include "BoardShared.h"
 
+static String getTraccarDeviceIdFromEfuse();
+
 /**
  * Default RTC read: no battery-backed clock on this board.
  * Returns 0, which tells the caller to fall back to SNTP or GPS.
@@ -794,7 +796,7 @@ void BoardCore::recordContributeSample()
   }
 }
 
-Board320_240::ContributeChargingEvent BoardCore::captureContributeChargingEventSnapshot(time_t eventTime) const
+BoardCore::ContributeChargingEvent BoardCore::captureContributeChargingEventSnapshot(time_t eventTime) const
 {
   ContributeChargingEvent event{};
   event.valid = true;
