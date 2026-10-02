@@ -52,6 +52,28 @@ public:
   virtual bool sdBegin();
 
   //
+  // Identity
+  //
+  // Reported to the server and shown in Home Assistant discovery. Defaults to
+  // the M5 Core2 name; every other board overrides it, because this string is
+  // what distinguishes one evDash build from another in the fleet.
+  virtual const char *hardwareModelName() { return "Core2"; }
+
+  // Byte mixed into the efuse-derived device UUID. It has to differ per board,
+  // otherwise a device that changes hardware keeps claiming the previous one's
+  // identity on the server. M5 Core2 keeps the original 0x02, CoreS3 0x03.
+  virtual uint8_t hardwareIdTag() { return 0x02; }
+
+  //
+  // Clock
+  //
+  // Seeds the system clock at boot and registers the SNTP completion callback.
+  // Shared rather than per-board because the callback and the flag the network
+  // loop tests are file-scope state: splitting seeding and the loop across
+  // translation units would leave each looking at its own copy.
+  void seedSystemClock();
+
+  //
   // Loop and lifecycle
   //
   // Still pure while the remaining shared logic lives in Board320_240. They are
@@ -66,6 +88,8 @@ public:
   virtual void mainLoop();
   virtual void enterSleepMode(int secs) { (void)secs; }
   virtual void ntpSync() {}
+  bool netSendData(bool sendAbrp) override;
+  void disconnectMqtt(bool sendOfflineStatus = false) override;
   virtual void sdcardToggleRecording() {}
   virtual void displayMessage(const char *row1, const char *row2) { (void)row1; (void)row2; }
   virtual void displayMessage(const char *row1, const char *row2, const char *row3)
@@ -247,6 +271,13 @@ protected:
   void wifiSwitchToIndex(uint8_t index);
   void uploadSdCardLogToEvDashServer(bool silent = false);
   void queueAbrpSdLog(const char *payload, size_t length, time_t currentTime, uint64_t operationTimeSec, bool timeSyncWithGps);
+protected:
+  // Pin pair for the external NMEA GPS UART, or a negative value when the board
+  // has no separate NMEA line. The M5 boards take their pins from the M5 headers;
+  // a board whose GNSS arrives as NMEA over the modem's AT UART has none.
+  virtual int gpsUartRxPin() { return -1; }
+  virtual int gpsUartTxPin() { return -1; }
+
 public:
   // Button GPIOs. Read by the shared main loop; a headless board leaves them 0
   // and simply never matches a button press.

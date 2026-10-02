@@ -19,6 +19,8 @@
 #include <PubSubClient.h>
 #include <esp_sntp.h>
 #include <math.h>
+#include <SD.h>
+#include <SPI.h>
 #include "config.h"
 #include "LiveData.h"
 #include "EvDashMobileRelay.h"
@@ -658,4 +660,9 @@ namespace
     }
     return true;
   }
+  bool isWifiSsidConfigured(const char *ssid)
+{
+  return ssid != nullptr && ssid[0] != '\0' && strcmp(ssid, "empty") != 0 && strcmp(ssid, "not_set") != 0;
+}
+
 } // namespace

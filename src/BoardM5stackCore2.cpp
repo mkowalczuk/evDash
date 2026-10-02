@@ -22,6 +22,10 @@ Overall, this initializes the specific hardware on the M5Stack Core2, configures
 #include "Board320_240.h"
 #include "BoardM5stackCore2.h"
 
+// An M5Stack-specific board adapter. A headless build does not use it, and it
+// pulls in the M5 display stack, so it is not compiled there.
+#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+
 // GNSS Module with Barometric Pressure, IMU, Magnetometer Sensors (NEO-M9N, BMP280, BMI270, BMM150)
 // https://github.com/m5stack/M5Module-GNSS/blob/main/examples/getSensorData/getSensorData.ino
 /*#include <Adafruit_BMP280.h>
@@ -748,3 +752,4 @@ void BoardM5stackCore2::syncRtcFromSystemTime()
 }
 
 #endif // BOARD_M5STACK_CORE2
+#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3

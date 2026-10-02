@@ -103,9 +103,14 @@ public:
   void handleWebLogDownload(WebServer &server);
   void handleWebLogView(WebServer &server);
   void handleWebLogDelete(WebServer &server);
+  //
   // GPS
-  bool netSendData(bool sendAbrp) override;
-  void disconnectMqtt(bool sendOfflineStatus = false) override;
+  //
+  // The M5 headers fix the external NMEA UART on the second serial port.
+  // initGPS() itself is shared, in BoardCore.
+  int gpsUartRxPin() override;
+  int gpsUartTxPin() override;
+  //
   bool buildContributePayloadV2(String &outJson, bool useReadableTsForSd = false) override;
   bool wifiScanToMenu();
   bool promptKeyboard(const char *title, String &value, bool mask, uint8_t maxLen = 63);
