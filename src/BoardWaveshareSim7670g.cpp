@@ -26,6 +26,7 @@ void BoardWaveshareSim7670g::initBoard()
   if (liveData->settings.voltmeterEnabled == 1)
   {
     Wire.begin(BAT_SDA_PIN, BAT_SCL_PIN);
+    Wire.setTimeout(1000);
     if (max17048.begin(Wire))
     {
       syslog->println("MAX17048 initialized");
@@ -136,11 +137,17 @@ bool BoardWaveshareSim7670g::modemBegin()
 bool BoardWaveshareSim7670g::sdBegin()
 {
   // SDMMC on ESP32-S3: CLK 5, CMD 4, DATA 6 (1-bit mode by default)
+  // Be defensive: if pins can't be set or card absent, just fail gracefully
   if (!SD_MMC.setPins(SDMMC_CLK_PIN, SDMMC_CMD_PIN, SDMMC_DATA_PIN))
   {
     return false;
   }
-  return SD_MMC.begin("/sdcard", false);
+  bool ok = SD_MMC.begin("/sdcard", false);
+  if (!ok)
+  {
+    return false;
+  }
+  return true;
 }
 
 #endif // BOARD_WAVESHARE_SIM7670G
