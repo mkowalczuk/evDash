@@ -71,6 +71,7 @@ public:
   bool customConsoleCommand(String cmd);
   static void generateRandomAlphanumeric(char *buf, size_t count);
   static bool isValidPassword(const char *pwd, size_t minLen = 8);
+  virtual bool wifiSetup() { return false; }
   // Sdcard
   virtual bool sdcardMount() { return false; };
   virtual void sdcardToggleRecording() = 0;

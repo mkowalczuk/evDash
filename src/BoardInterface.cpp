@@ -34,6 +34,10 @@ It handles attaching communications and live data objects. And provides methods 
 #include "CommObd2Can.h"
 #include "LiveData.h"
 #include "Solarlib.h"
+#include "CarModelUtils.h"
+#include "EvDashMobileRelay.h"
+
+extern EvDashMobileRelay *mobileRelay;
 
 /**
  * Set live data
@@ -753,30 +757,6 @@ bool BoardInterface::customConsoleCommand(String cmd)
     enterSleepMode(0);
     return true;
   }
-  if (cmd.equalsIgnoreCase("apPassword"))
-  {
-    syslog->print("AP password: ");
-    syslog->println(liveData->settings.webLogServerPassword);
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("bleAddressType") || cmd.equalsIgnoreCase("bleAddrType"))
-  {
-    syslog->print("BLE MAC address type: ");
-    syslog->println((liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "PUBLIC (fallback RANDOM)" : "RANDOM (fallback PUBLIC)");
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("debugLevel"))
-  {
-    syslog->printf("Debug level bitmask: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
-                   liveData->settings.debugLevel,
-                   (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
-    return true;
-  }
-  // CAN comparer
   if (cmd.equalsIgnoreCase("compare"))
   {
     if (commInterface != nullptr)
@@ -820,7 +800,7 @@ bool BoardInterface::customConsoleCommand(String cmd)
     return true;
   }
 
-  // MQTT getters
+  // MQTT getters summary
   if (cmd.equalsIgnoreCase("mqtt") || cmd.equalsIgnoreCase("showMqtt"))
   {
     syslog->println("MQTT settings:");
@@ -847,456 +827,1598 @@ bool BoardInterface::customConsoleCommand(String cmd)
     syslog->printf("  homeassistant: %s\n", (liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
     return true;
   }
-  if (cmd.equalsIgnoreCase("haName"))
+
+  if (cmd.equalsIgnoreCase("wifiScan") || cmd.equalsIgnoreCase("scanWifi"))
   {
-    syslog->print("HA Name: ");
-    syslog->println((strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : "(unset, uses mqttId)");
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("haModel"))
-  {
-    syslog->print("HA Model: ");
-    syslog->println((strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel : "(unset, uses mqttTopic)");
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("mqttInterval"))
-  {
-    syslog->print("MQTT upload interval: ");
-    if (liveData->settings.remoteUploadIntervalSec == 0)
+    syslog->println("Scanning WiFi networks...");
+    int n = WiFi.scanNetworks();
+    syslog->printf("Found %d networks:\n", n);
+    for (int i = 0; i < n; ++i)
     {
-      syslog->println("0 (auto 60s)");
+      syslog->printf("  %2d: %-32s (%4d dBm, ch %2d, %s)\n",
+                     i + 1,
+                     WiFi.SSID(i).c_str(),
+                     WiFi.RSSI(i),
+                     WiFi.channel(i),
+                     (WiFi.encryptionType(i) == WIFI_AUTH_OPEN) ? "open" : "encrypted");
+    }
+    WiFi.scanDelete();
+    return true;
+  }
+
+  if (cmd.equalsIgnoreCase("wifiConnect") || cmd.equalsIgnoreCase("wifiSetup"))
+  {
+    syslog->println("Triggering WiFi connect...");
+    wifiSetup();
+    return true;
+  }
+
+  if (cmd.equalsIgnoreCase("cars") || cmd.equalsIgnoreCase("listCars"))
+  {
+    syslog->println("Available vehicles (carType):");
+    for (int i = 0; i <= 50; i++)
+    {
+      String abrp = getCarModelAbrpStr(i);
+      if (abrp != "n/a")
+      {
+        syslog->printf("  %2d: %-32s (%s)\n", i, abrp.c_str(), getCarModelRelayId(i).c_str());
+      }
+    }
+    return true;
+  }
+
+  if (cmd.equalsIgnoreCase("clearStats"))
+  {
+    liveData->clearDrivingAndChargingStats(CAR_MODE_DRIVE);
+    syslog->println("Driving and charging stats cleared.");
+    return true;
+  }
+
+  if (cmd.equalsIgnoreCase("loadTestData"))
+  {
+    if (carInterface != nullptr)
+      carInterface->loadTestData();
+    syslog->println("Test data loaded.");
+    return true;
+  }
+
+  if (cmd.equalsIgnoreCase("mobileRelayPair"))
+  {
+    liveData->settings.relayForMobileEnabled = 1;
+    saveSettings();
+    String code = (mobileRelay != nullptr) ? mobileRelay->startPairing() : "";
+    syslog->printf("Mobile relay pairing code: %s\n", code.c_str());
+    return true;
+  }
+
+  if (cmd.equalsIgnoreCase("mobileRelayForget"))
+  {
+    if (mobileRelay != nullptr)
+    {
+      mobileRelay->forgetPairing();
     }
     else
     {
-      syslog->printf("%u sec\n", liveData->settings.remoteUploadIntervalSec);
+      liveData->settings.relayToken[0] = '\0';
+      liveData->settings.relayMobileId[0] = '\0';
+      saveSettings();
     }
+    syslog->println("Mobile relay pairing forgotten.");
     return true;
   }
-  if (cmd.equalsIgnoreCase("mqttHa") || cmd.equalsIgnoreCase("mqttHomeAssistant"))
+
+  if (cmd.equalsIgnoreCase("voltmeterInfo") || cmd.equalsIgnoreCase("voltmeter"))
   {
-    syslog->print("MQTT Home Assistant discovery: ");
-    syslog->println((liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("mqttEnabled"))
-  {
-    syslog->print("MQTT enabled: ");
-    syslog->println((liveData->settings.mqttEnabled == 1) ? "ON" : "OFF");
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("mqttSecure") || cmd.equalsIgnoreCase("mqttTls") || cmd.equalsIgnoreCase("mqttUseTls"))
-  {
-    syslog->print("MQTT TLS/secure: ");
-    syslog->println((liveData->settings.mqttUseTls == 1) ? "ON" : "OFF");
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("mqttPort"))
-  {
-    syslog->print("MQTT port: ");
-    if (liveData->settings.mqttPort == 0)
+    if (liveData->settings.voltmeterEnabled == 1)
     {
-      syslog->printf("0 (default: %u)\n", (liveData->settings.mqttUseTls == 1) ? 8883 : 1883);
+      syslog->printf("Voltmeter enabled. Aux voltage: %.2fV\n", liveData->params.auxVoltage);
     }
     else
     {
-      syslog->println(liveData->settings.mqttPort);
+      syslog->println("Voltmeter is disabled (voltmeterEnabled=0).");
     }
     return true;
   }
-  if (cmd.equalsIgnoreCase("mqttServer"))
+
+  if (cmd.equalsIgnoreCase("sdcardStatus") || cmd.equalsIgnoreCase("sdcardMount"))
   {
-    syslog->print("MQTT server: ");
-    syslog->println(liveData->settings.mqttServer);
+    bool mounted = sdcardMount();
+    syslog->printf("SD card status: %s\n", mounted ? "mounted" : "not mounted / not available");
     return true;
   }
-  if (cmd.equalsIgnoreCase("mqttId"))
+
+  if (cmd.equalsIgnoreCase("contributeOnce"))
   {
-    syslog->print("MQTT id: ");
-    syslog->println(liveData->settings.mqttId);
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("mqttUsername") || cmd.equalsIgnoreCase("mqttUser"))
-  {
-    syslog->print("MQTT username: ");
-    syslog->println(liveData->settings.mqttUsername);
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("mqttPassword") || cmd.equalsIgnoreCase("mqttPasswd"))
-  {
-    syslog->print("MQTT password: ");
-    syslog->println((strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
-    return true;
-  }
-  if (cmd.equalsIgnoreCase("mqttPubTopic") || cmd.equalsIgnoreCase("mqttTopic"))
-  {
-    syslog->print("MQTT topic: ");
-    syslog->println(liveData->settings.mqttPubTopic);
+    syslog->println("Triggering contribute once...");
+    liveData->params.netAvailable = true;
+    liveData->params.lastContributeSent = liveData->params.currentTime;
+    liveData->params.contributeStatus = CONTRIBUTE_READY_TO_SEND;
     return true;
   }
 
   int8_t idx = cmd.indexOf("=");
-  if (idx == -1)
-    return false;
-
-  String key = cmd.substring(0, idx);
-  String value = cmd.substring(idx + 1);
+  bool isSetter = (idx != -1);
+  String key = isSetter ? cmd.substring(0, idx) : cmd;
+  String value = isSetter ? cmd.substring(idx + 1) : "";
   key.trim();
   value.trim();
 
-  // Bounded to destination size (truncates + NUL-terminates); an over-length value
-  // would otherwise overflow into adjacent settings fields (issue #123).
-  if (key.equalsIgnoreCase("serviceUUID"))
-  {
-    value.toCharArray(liveData->settings.serviceUUID, sizeof(liveData->settings.serviceUUID));
-    return true;
-  }
-  if (key.equalsIgnoreCase("charTxUUID"))
-  {
-    value.toCharArray(liveData->settings.charTxUUID, sizeof(liveData->settings.charTxUUID));
-    return true;
-  }
-  if (key.equalsIgnoreCase("charRxUUID"))
-  {
-    value.toCharArray(liveData->settings.charRxUUID, sizeof(liveData->settings.charRxUUID));
-    return true;
-  }
+  auto parseBool = [](const String &v) -> int8_t {
+    if (v == "1" || v.equalsIgnoreCase("true") || v.equalsIgnoreCase("yes") || v.equalsIgnoreCase("on")) return 1;
+    if (v == "0" || v.equalsIgnoreCase("false") || v.equalsIgnoreCase("no") || v.equalsIgnoreCase("off")) return 0;
+    return -1;
+  };
 
+  // WiFi
+  if (key.equalsIgnoreCase("wifiEnabled"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.wifiEnabled = b;
+        saveSettings();
+        syslog->printf("wifiEnabled set to: %s\n", (liveData->settings.wifiEnabled == 1) ? "ON (1)" : "OFF (0)");
+        if (liveData->settings.wifiEnabled == 1)
+        {
+          wifiSetup();
+        }
+        else
+        {
+          WiFi.disconnect(true, false);
+        }
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("wifiEnabled: %s\n", (liveData->settings.wifiEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
   if (key.equalsIgnoreCase("wifiSsid"))
   {
-    value.toCharArray(liveData->settings.wifiSsid, sizeof(liveData->settings.wifiSsid));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.wifiSsid, sizeof(liveData->settings.wifiSsid));
+      saveSettings();
+      syslog->printf("wifiSsid set to: %s\n", liveData->settings.wifiSsid);
+      if (liveData->settings.wifiEnabled == 1)
+      {
+        wifiSetup();
+      }
+    }
+    else
+    {
+      syslog->printf("wifiSsid: %s\n", liveData->settings.wifiSsid);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("wifiPassword"))
   {
-    value.toCharArray(liveData->settings.wifiPassword, sizeof(liveData->settings.wifiPassword));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.wifiPassword, sizeof(liveData->settings.wifiPassword));
+      saveSettings();
+      syslog->println("wifiPassword updated.");
+      if (liveData->settings.wifiEnabled == 1)
+      {
+        wifiSetup();
+      }
+    }
+    else
+    {
+      syslog->printf("wifiPassword: %s\n", (strlen(liveData->settings.wifiPassword) > 0) ? "******" : "(empty)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("backupWifi") || key.equalsIgnoreCase("backupWifiEnabled") || key.equalsIgnoreCase("wifiEnabled2"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.backupWifiEnabled = b;
+        saveSettings();
+        syslog->printf("backupWifiEnabled set to: %s\n", (liveData->settings.backupWifiEnabled == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("backupWifiEnabled: %s\n", (liveData->settings.backupWifiEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
     return true;
   }
   if (key.equalsIgnoreCase("wifiSsid2"))
   {
-    value.toCharArray(liveData->settings.wifiSsid2, sizeof(liveData->settings.wifiSsid2));
-    if (strcmp(liveData->settings.wifiSsid2, "empty") == 0)
+    if (isSetter)
     {
-      liveData->settings.backupWifiEnabled = 0;
+      value.toCharArray(liveData->settings.wifiSsid2, sizeof(liveData->settings.wifiSsid2));
+      if (strcmp(liveData->settings.wifiSsid2, "empty") == 0)
+        liveData->settings.backupWifiEnabled = 0;
+      else
+        liveData->settings.backupWifiEnabled = 1;
+      saveSettings();
+      syslog->printf("wifiSsid2 set to: %s\n", liveData->settings.wifiSsid2);
     }
     else
     {
-      liveData->settings.backupWifiEnabled = 1;
+      syslog->printf("wifiSsid2: %s\n", liveData->settings.wifiSsid2);
     }
     return true;
   }
   if (key.equalsIgnoreCase("wifiPassword2"))
   {
-    value.toCharArray(liveData->settings.wifiPassword2, sizeof(liveData->settings.wifiPassword2));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.wifiPassword2, sizeof(liveData->settings.wifiPassword2));
+      saveSettings();
+      syslog->println("wifiPassword2 updated.");
+    }
+    else
+    {
+      syslog->printf("wifiPassword2: %s\n", (strlen(liveData->settings.wifiPassword2) > 0) ? "******" : "(empty)");
+    }
     return true;
   }
   if (key.equalsIgnoreCase("wifiSsid3"))
   {
-    value.toCharArray(liveData->settings.wifiSsid3, sizeof(liveData->settings.wifiSsid3));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.wifiSsid3, sizeof(liveData->settings.wifiSsid3));
+      saveSettings();
+      syslog->printf("wifiSsid3 set to: %s\n", liveData->settings.wifiSsid3);
+    }
+    else
+    {
+      syslog->printf("wifiSsid3: %s\n", liveData->settings.wifiSsid3);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("wifiPassword3"))
   {
-    value.toCharArray(liveData->settings.wifiPassword3, sizeof(liveData->settings.wifiPassword3));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.wifiPassword3, sizeof(liveData->settings.wifiPassword3));
+      saveSettings();
+      syslog->println("wifiPassword3 updated.");
+    }
+    else
+    {
+      syslog->printf("wifiPassword3: %s\n", (strlen(liveData->settings.wifiPassword3) > 0) ? "******" : "(empty)");
+    }
     return true;
   }
   if (key.equalsIgnoreCase("wifiSsid4"))
   {
-    value.toCharArray(liveData->settings.wifiSsid4, sizeof(liveData->settings.wifiSsid4));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.wifiSsid4, sizeof(liveData->settings.wifiSsid4));
+      saveSettings();
+      syslog->printf("wifiSsid4 set to: %s\n", liveData->settings.wifiSsid4);
+    }
+    else
+    {
+      syslog->printf("wifiSsid4: %s\n", liveData->settings.wifiSsid4);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("wifiPassword4"))
   {
-    value.toCharArray(liveData->settings.wifiPassword4, sizeof(liveData->settings.wifiPassword4));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.wifiPassword4, sizeof(liveData->settings.wifiPassword4));
+      saveSettings();
+      syslog->println("wifiPassword4 updated.");
+    }
+    else
+    {
+      syslog->printf("wifiPassword4: %s\n", (strlen(liveData->settings.wifiPassword4) > 0) ? "******" : "(empty)");
+    }
     return true;
   }
   if (key.equalsIgnoreCase("apPassword"))
   {
-    if (value.length() < 8)
+    if (isSetter)
     {
-      syslog->println("Error: AP password must be at least 8 characters");
-      return true;
+      if (value.length() < 8)
+      {
+        syslog->println("Error: AP password must be at least 8 characters");
+        return true;
+      }
+      if (!isValidPassword(value.c_str(), 8))
+      {
+        syslog->println("Error: AP password must contain only alphanumeric characters");
+        return true;
+      }
+      value.toCharArray(liveData->settings.webLogServerPassword, sizeof(liveData->settings.webLogServerPassword));
+      saveSettings();
+      syslog->printf("AP password set to: %s\n", liveData->settings.webLogServerPassword);
     }
-    if (!isValidPassword(value.c_str(), 8))
+    else
     {
-      syslog->println("Error: AP password must contain only alphanumeric characters");
-      return true;
+      syslog->printf("AP password: %s\n", liveData->settings.webLogServerPassword);
     }
-    value.toCharArray(liveData->settings.webLogServerPassword, sizeof(liveData->settings.webLogServerPassword));
-    syslog->print("AP password set to: ");
-    syslog->println(liveData->settings.webLogServerPassword);
-    saveSettings();
+    return true;
+  }
+  if (key.equalsIgnoreCase("ntpEnabled") || key.equalsIgnoreCase("wifiNtp"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.ntpEnabled = b;
+        saveSettings();
+        syslog->printf("ntpEnabled set to: %s\n", (liveData->settings.ntpEnabled == 1) ? "ON (1)" : "OFF (0)");
+        if (liveData->settings.ntpEnabled == 1)
+          ntpSync();
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("ntpEnabled: %s\n", (liveData->settings.ntpEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+
+  // Vehicle
+  if (key.equalsIgnoreCase("carType"))
+  {
+    if (isSetter)
+    {
+      int val = -1;
+      if (value.length() > 0 && isdigit(value[0]))
+      {
+        val = value.toInt();
+      }
+      else
+      {
+        for (int i = 0; i <= 50; i++)
+        {
+          String abrp = getCarModelAbrpStr(i);
+          String relay = getCarModelRelayId(i);
+          if (abrp != "n/a" && abrp.indexOf(value) != -1) { val = i; break; }
+          if (relay != "unknown" && relay.indexOf(value) != -1) { val = i; break; }
+        }
+      }
+      if (val >= 0)
+      {
+        liveData->settings.carType = static_cast<uint16_t>(val);
+        saveSettings();
+        syslog->printf("carType set to: %u (%s). Note: reboot required to apply.\n",
+                       liveData->settings.carType, getCarModelAbrpStr(liveData->settings.carType).c_str());
+      }
+      else
+      {
+        syslog->println("Error: Unknown carType. Pass numeric ID or model string (run 'cars' to list).");
+      }
+    }
+    else
+    {
+      syslog->printf("carType: %u (%s / %s)\n",
+                     liveData->settings.carType,
+                     getCarModelAbrpStr(liveData->settings.carType).c_str(),
+                     getCarModelRelayId(liveData->settings.carType).c_str());
+    }
+    return true;
+  }
+
+  // OBD2 / CAN Adapter
+  if (key.equalsIgnoreCase("commType"))
+  {
+    if (isSetter)
+    {
+      if (value.equalsIgnoreCase("can") || value == "1")
+        liveData->settings.commType = COMM_TYPE_CAN_COMMU;
+      else if (value.equalsIgnoreCase("ble") || value.equalsIgnoreCase("ble4") || value == "0")
+        liveData->settings.commType = COMM_TYPE_OBD2_BLE4;
+      else
+      {
+        syslog->println("Error: commType must be 0 (BLE) or 1 (CAN)");
+        return true;
+      }
+      saveSettings();
+      syslog->printf("commType set to: %u (%s). Note: reboot required to apply.\n",
+                     liveData->settings.commType,
+                     (liveData->settings.commType == COMM_TYPE_CAN_COMMU) ? "CAN" : "OBD2 BLE4");
+    }
+    else
+    {
+      syslog->printf("commType: %u (%s)\n",
+                     liveData->settings.commType,
+                     (liveData->settings.commType == COMM_TYPE_CAN_COMMU) ? "CAN" : "OBD2 BLE4");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("obdMacAddress") || key.equalsIgnoreCase("obdMac"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.obdMacAddress, sizeof(liveData->settings.obdMacAddress));
+      saveSettings();
+      syslog->printf("obdMacAddress set to: %s\n", liveData->settings.obdMacAddress);
+    }
+    else
+    {
+      syslog->printf("obdMacAddress: %s\n", liveData->settings.obdMacAddress);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("obd2Name") || key.equalsIgnoreCase("bleName"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.obd2Name, sizeof(liveData->settings.obd2Name));
+      saveSettings();
+      syslog->printf("obd2Name set to: %s\n", liveData->settings.obd2Name);
+    }
+    else
+    {
+      syslog->printf("obd2Name: %s\n", liveData->settings.obd2Name);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("serviceUUID"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.serviceUUID, sizeof(liveData->settings.serviceUUID));
+      saveSettings();
+      syslog->printf("serviceUUID set to: %s\n", liveData->settings.serviceUUID);
+    }
+    else
+    {
+      syslog->printf("serviceUUID: %s\n", liveData->settings.serviceUUID);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("charTxUUID"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.charTxUUID, sizeof(liveData->settings.charTxUUID));
+      saveSettings();
+      syslog->printf("charTxUUID set to: %s\n", liveData->settings.charTxUUID);
+    }
+    else
+    {
+      syslog->printf("charTxUUID: %s\n", liveData->settings.charTxUUID);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("charRxUUID"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.charRxUUID, sizeof(liveData->settings.charRxUUID));
+      saveSettings();
+      syslog->printf("charRxUUID set to: %s\n", liveData->settings.charRxUUID);
+    }
+    else
+    {
+      syslog->printf("charRxUUID: %s\n", liveData->settings.charRxUUID);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("bleAddressType") || key.equalsIgnoreCase("bleAddrType"))
   {
-    if (value.equalsIgnoreCase("public") || value.equalsIgnoreCase("1") || value.equalsIgnoreCase("pub"))
+    if (isSetter)
     {
-      liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_PUBLIC;
+      if (value.equalsIgnoreCase("public") || value.equalsIgnoreCase("1") || value.equalsIgnoreCase("pub"))
+      {
+        liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_PUBLIC;
+      }
+      else
+      {
+        liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
+      }
+      saveSettings();
+      syslog->printf("BLE MAC address type set to: %s\n",
+                     (liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "PUBLIC (fallback RANDOM)" : "RANDOM (fallback PUBLIC)");
     }
     else
     {
-      liveData->settings.bleAddressType = BLE_ADDRESS_TYPE_RANDOM;
+      syslog->printf("BLE MAC address type: %s\n",
+                     (liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "PUBLIC (fallback RANDOM)" : "RANDOM (fallback PUBLIC)");
     }
-    syslog->print("BLE MAC address type set to: ");
-    syslog->println((liveData->settings.bleAddressType == BLE_ADDRESS_TYPE_PUBLIC) ? "PUBLIC (fallback RANDOM)" : "RANDOM (fallback PUBLIC)");
-    saveSettings();
+    return true;
+  }
+  if (key.equalsIgnoreCase("commandQueueAutoStop"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.commandQueueAutoStop = b;
+        saveSettings();
+        syslog->printf("commandQueueAutoStop set to: %s\n", (liveData->settings.commandQueueAutoStop == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("commandQueueAutoStop: %s\n", (liveData->settings.commandQueueAutoStop == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("disableCommandOptimizer"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.disableCommandOptimizer = b;
+        saveSettings();
+        syslog->printf("disableCommandOptimizer set to: %s\n", (liveData->settings.disableCommandOptimizer == 1) ? "1 (Optimizer disabled)" : "0 (Optimizer active)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("disableCommandOptimizer: %s\n", (liveData->settings.disableCommandOptimizer == 1) ? "1 (Optimizer disabled)" : "0 (Optimizer active)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("mobileRelay") || key.equalsIgnoreCase("relayForMobileEnabled"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.relayForMobileEnabled = b;
+        saveSettings();
+        syslog->printf("relayForMobileEnabled set to: %s\n", (liveData->settings.relayForMobileEnabled == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("relayForMobileEnabled: %s\n", (liveData->settings.relayForMobileEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("relayToken"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.relayToken, sizeof(liveData->settings.relayToken));
+      saveSettings();
+      syslog->printf("relayToken set to: %s\n", liveData->settings.relayToken);
+    }
+    else
+    {
+      syslog->printf("relayToken: %s\n", liveData->settings.relayToken);
+    }
+    return true;
+  }
+
+  // Units
+  if (key.equalsIgnoreCase("distanceUnit") || key.equalsIgnoreCase("distance"))
+  {
+    if (isSetter)
+    {
+      if (value.equalsIgnoreCase("m") || value.equalsIgnoreCase("mi") || value.equalsIgnoreCase("miles"))
+        liveData->settings.distanceUnit = 'm';
+      else
+        liveData->settings.distanceUnit = 'k';
+      saveSettings();
+      syslog->printf("distanceUnit set to: %s\n", (liveData->settings.distanceUnit == 'm') ? "miles" : "km");
+    }
+    else
+    {
+      syslog->printf("distanceUnit: %s\n", (liveData->settings.distanceUnit == 'm') ? "miles" : "km");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("temperatureUnit") || key.equalsIgnoreCase("temperature"))
+  {
+    if (isSetter)
+    {
+      if (value.equalsIgnoreCase("f") || value.equalsIgnoreCase("fahrenheit"))
+        liveData->settings.temperatureUnit = 'f';
+      else
+        liveData->settings.temperatureUnit = 'c';
+      saveSettings();
+      syslog->printf("temperatureUnit set to: %s\n", (liveData->settings.temperatureUnit == 'f') ? "Fahrenheit" : "Celsius");
+    }
+    else
+    {
+      syslog->printf("temperatureUnit: %s\n", (liveData->settings.temperatureUnit == 'f') ? "Fahrenheit" : "Celsius");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("pressureUnit") || key.equalsIgnoreCase("pressure"))
+  {
+    if (isSetter)
+    {
+      if (value.equalsIgnoreCase("p") || value.equalsIgnoreCase("psi"))
+        liveData->settings.pressureUnit = 'p';
+      else
+        liveData->settings.pressureUnit = 'b';
+      saveSettings();
+      syslog->printf("pressureUnit set to: %s\n", (liveData->settings.pressureUnit == 'p') ? "psi" : "bar");
+    }
+    else
+    {
+      syslog->printf("pressureUnit: %s\n", (liveData->settings.pressureUnit == 'p') ? "psi" : "bar");
+    }
+    return true;
+  }
+
+  // Board Setup
+  if (key.equalsIgnoreCase("boardPowerMode") || key.equalsIgnoreCase("powerMode"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.boardPowerMode = b;
+        saveSettings();
+        syslog->printf("boardPowerMode set to: %u (%s)\n", liveData->settings.boardPowerMode, (liveData->settings.boardPowerMode == 1) ? "external" : "USB");
+      }
+      else
+      {
+        syslog->println("Error: Use 1 (external) or 0 (USB)");
+      }
+    }
+    else
+    {
+      syslog->printf("boardPowerMode: %u (%s)\n", liveData->settings.boardPowerMode, (liveData->settings.boardPowerMode == 1) ? "external" : "USB");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("timezone"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.timezone = static_cast<int8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("timezone set to: %d\n", liveData->settings.timezone);
+    }
+    else
+    {
+      syslog->printf("timezone: %d\n", liveData->settings.timezone);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("daylightSaving"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.daylightSaving = b;
+        saveSettings();
+        syslog->printf("daylightSaving set to: %s\n", (liveData->settings.daylightSaving == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("daylightSaving: %s\n", (liveData->settings.daylightSaving == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("defaultScreen"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.defaultScreen = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("defaultScreen set to: %u\n", liveData->settings.defaultScreen);
+    }
+    else
+    {
+      syslog->printf("defaultScreen: %u\n", liveData->settings.defaultScreen);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("displayRotation") || key.equalsIgnoreCase("screenRotation"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.displayRotation = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("displayRotation set to: %u\n", liveData->settings.displayRotation);
+    }
+    else
+    {
+      syslog->printf("displayRotation: %u\n", liveData->settings.displayRotation);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("lcdBrightness"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.lcdBrightness = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      setBrightness();
+      syslog->printf("lcdBrightness set to: %u%s\n", liveData->settings.lcdBrightness, (liveData->settings.lcdBrightness == 0) ? " (auto)" : "%");
+    }
+    else
+    {
+      syslog->printf("lcdBrightness: %u%s\n", liveData->settings.lcdBrightness, (liveData->settings.lcdBrightness == 0) ? " (auto)" : "%");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("sleepMode") || key.equalsIgnoreCase("sleepModeLevel"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.sleepModeLevel = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("sleepModeLevel set to: %u (0=off, 1=screen only, 2=deep sleep)\n", liveData->settings.sleepModeLevel);
+    }
+    else
+    {
+      syslog->printf("sleepModeLevel: %u (0=off, 1=screen only, 2=deep sleep)\n", liveData->settings.sleepModeLevel);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("serialConsolePort"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.serialConsolePort = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("serialConsolePort set to: %u\n", liveData->settings.serialConsolePort);
+    }
+    else
+    {
+      syslog->printf("serialConsolePort: %u\n", liveData->settings.serialConsolePort);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("speedCorrection"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.speedCorrection = static_cast<int8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("speedCorrection set to: %d\n", liveData->settings.speedCorrection);
+    }
+    else
+    {
+      syslog->printf("speedCorrection: %d\n", liveData->settings.speedCorrection);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("rightHandDrive") || key.equalsIgnoreCase("rhd"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.rightHandDrive = b;
+        saveSettings();
+        syslog->printf("rightHandDrive set to: %s\n", (liveData->settings.rightHandDrive == 1) ? "RHD (1)" : "LHD (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("rightHandDrive: %s\n", (liveData->settings.rightHandDrive == 1) ? "RHD (1)" : "LHD (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("gprsHwSerialPort"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.gprsHwSerialPort = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("gprsHwSerialPort set to: %u\n", liveData->settings.gprsHwSerialPort);
+    }
+    else
+    {
+      syslog->printf("gprsHwSerialPort: %u\n", liveData->settings.gprsHwSerialPort);
+    }
+    return true;
+  }
+
+  // SD card
+  if (key.equalsIgnoreCase("sdcardEnabled"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.sdcardEnabled = b;
+        saveSettings();
+        syslog->printf("sdcardEnabled set to: %s\n", (liveData->settings.sdcardEnabled == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("sdcardEnabled: %s\n", (liveData->settings.sdcardEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("sdcardConsoleLog") || key.equalsIgnoreCase("sdcardConsoleLogEnabled"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.sdcardConsoleLogEnabled = b;
+        saveSettings();
+        syslog->printf("sdcardConsoleLogEnabled set to: %s\n", (liveData->settings.sdcardConsoleLogEnabled == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("sdcardConsoleLogEnabled: %s\n", (liveData->settings.sdcardConsoleLogEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("sdcardAutstartLog"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.sdcardAutstartLog = b;
+        saveSettings();
+        syslog->printf("sdcardAutstartLog set to: %s\n", (liveData->settings.sdcardAutstartLog == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("sdcardAutstartLog: %s\n", (liveData->settings.sdcardAutstartLog == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+
+  // GPS
+  if (key.equalsIgnoreCase("gpsModuleType"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.gpsModuleType = static_cast<uint8_t>(value.toInt());
+      if (liveData->settings.gpsModuleType == GPS_MODULE_TYPE_NEO_M8N)
+        liveData->settings.gpsSerialPortSpeed = 9600;
+      else if (liveData->settings.gpsModuleType == GPS_MODULE_TYPE_M5_GNSS)
+        liveData->settings.gpsSerialPortSpeed = 38400;
+      else if (liveData->settings.gpsModuleType == GPS_MODULE_TYPE_GPS_V21_GNSS)
+        liveData->settings.gpsSerialPortSpeed = 115200;
+      saveSettings();
+      syslog->printf("gpsModuleType set to: %u (baud %lu)\n", liveData->settings.gpsModuleType, liveData->settings.gpsSerialPortSpeed);
+    }
+    else
+    {
+      syslog->printf("gpsModuleType: %u\n", liveData->settings.gpsModuleType);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("gpsPort") || key.equalsIgnoreCase("gpsHwSerialPort"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.gpsHwSerialPort = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("gpsHwSerialPort set to: %u\n", liveData->settings.gpsHwSerialPort);
+    }
+    else
+    {
+      syslog->printf("gpsHwSerialPort: %u\n", liveData->settings.gpsHwSerialPort);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("gpsSpeed") || key.equalsIgnoreCase("gpsSerialPortSpeed"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.gpsSerialPortSpeed = value.toInt();
+      saveSettings();
+      syslog->printf("gpsSerialPortSpeed set to: %lu\n", liveData->settings.gpsSerialPortSpeed);
+    }
+    else
+    {
+      syslog->printf("gpsSerialPortSpeed: %lu\n", liveData->settings.gpsSerialPortSpeed);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("carSpeedType"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.carSpeedType = static_cast<uint8_t>(value.toInt());
+      saveSettings();
+      syslog->printf("carSpeedType set to: %u (0=auto, 1=car, 2=gps)\n", liveData->settings.carSpeedType);
+    }
+    else
+    {
+      syslog->printf("carSpeedType: %u (0=auto, 1=car, 2=gps)\n", liveData->settings.carSpeedType);
+    }
+    return true;
+  }
+
+  // Voltmeter INA3221
+  if (key.equalsIgnoreCase("voltmeterEnabled"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.voltmeterEnabled = b;
+        saveSettings();
+        syslog->printf("voltmeterEnabled set to: %s\n", (liveData->settings.voltmeterEnabled == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("voltmeterEnabled: %s\n", (liveData->settings.voltmeterEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("voltmeterSleep") || key.equalsIgnoreCase("voltmeterBasedSleep"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.voltmeterBasedSleep = b;
+        saveSettings();
+        syslog->printf("voltmeterBasedSleep set to: %s\n", (liveData->settings.voltmeterBasedSleep == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("voltmeterBasedSleep: %s\n", (liveData->settings.voltmeterBasedSleep == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("voltmeterSleepVol"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.voltmeterSleep = value.toFloat();
+      saveSettings();
+      syslog->printf("voltmeterSleep set to: %.2fV\n", liveData->settings.voltmeterSleep);
+    }
+    else
+    {
+      syslog->printf("voltmeterSleep: %.2fV\n", liveData->settings.voltmeterSleep);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("voltmeterWakeUpVol"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.voltmeterWakeUp = value.toFloat();
+      saveSettings();
+      syslog->printf("voltmeterWakeUp set to: %.2fV\n", liveData->settings.voltmeterWakeUp);
+    }
+    else
+    {
+      syslog->printf("voltmeterWakeUp: %.2fV\n", liveData->settings.voltmeterWakeUp);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("voltmeterCutOffVol"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.voltmeterCutOff = value.toFloat();
+      saveSettings();
+      syslog->printf("voltmeterCutOff set to: %.2fV\n", liveData->settings.voltmeterCutOff);
+    }
+    else
+    {
+      syslog->printf("voltmeterCutOff: %.2fV\n", liveData->settings.voltmeterCutOff);
+    }
+    return true;
+  }
+
+  // Remote upload & ABRP
+  if (key.equalsIgnoreCase("remoteUploadIntervalSec") || key.equalsIgnoreCase("apiInterval"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.remoteUploadIntervalSec = static_cast<uint16_t>(value.toInt());
+      saveSettings();
+      syslog->printf("remoteUploadIntervalSec set to: %u\n", liveData->settings.remoteUploadIntervalSec);
+    }
+    else
+    {
+      syslog->printf("remoteUploadIntervalSec: %u\n", liveData->settings.remoteUploadIntervalSec);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("remoteUploadAbrpIntervalSec") || key.equalsIgnoreCase("abrpInterval"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.remoteUploadAbrpIntervalSec = static_cast<uint16_t>(value.toInt());
+      saveSettings();
+      syslog->printf("remoteUploadAbrpIntervalSec set to: %u\n", liveData->settings.remoteUploadAbrpIntervalSec);
+    }
+    else
+    {
+      syslog->printf("remoteUploadAbrpIntervalSec: %u\n", liveData->settings.remoteUploadAbrpIntervalSec);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("remoteApiUrl"))
   {
-    value.toCharArray(liveData->settings.remoteApiUrl, sizeof(liveData->settings.remoteApiUrl));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.remoteApiUrl, sizeof(liveData->settings.remoteApiUrl));
+      saveSettings();
+      syslog->printf("remoteApiUrl set to: %s\n", liveData->settings.remoteApiUrl);
+    }
+    else
+    {
+      syslog->printf("remoteApiUrl: %s\n", liveData->settings.remoteApiUrl);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("remoteApiKey"))
   {
-    value.toCharArray(liveData->settings.remoteApiKey, sizeof(liveData->settings.remoteApiKey));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.remoteApiKey, sizeof(liveData->settings.remoteApiKey));
+      saveSettings();
+      syslog->printf("remoteApiKey set to: %s\n", liveData->settings.remoteApiKey);
+    }
+    else
+    {
+      syslog->printf("remoteApiKey: %s\n", liveData->settings.remoteApiKey);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("abrpApiToken"))
   {
-    value.toCharArray(liveData->settings.abrpApiToken, sizeof(liveData->settings.abrpApiToken));
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.abrpApiToken, sizeof(liveData->settings.abrpApiToken));
+      saveSettings();
+      syslog->printf("abrpApiToken set to: %s\n", liveData->settings.abrpApiToken);
+    }
+    else
+    {
+      syslog->printf("abrpApiToken: %s\n", liveData->settings.abrpApiToken);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("abrpSdcardLog"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.abrpSdcardLog = b;
+        saveSettings();
+        syslog->printf("abrpSdcardLog set to: %s\n", (liveData->settings.abrpSdcardLog == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("abrpSdcardLog: %s\n", (liveData->settings.abrpSdcardLog == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("contributeData"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.contributeData = b;
+        saveSettings();
+        syslog->printf("contributeData set to: %s\n", (liveData->settings.contributeData == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("contributeData: %s\n", (liveData->settings.contributeData == 1) ? "ON (1)" : "OFF (0)");
+    }
     return true;
   }
 
-  // Mqtt
+  // Traccar
+  if (key.equalsIgnoreCase("traccarEnabled"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.traccarEnabled = b;
+        saveSettings();
+        syslog->printf("traccarEnabled set to: %s\n", (liveData->settings.traccarEnabled == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("traccarEnabled: %s\n", (liveData->settings.traccarEnabled == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("traccarServer") || key.equalsIgnoreCase("traccarServerHost"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.traccarServerHost, sizeof(liveData->settings.traccarServerHost));
+      saveSettings();
+      syslog->printf("traccarServer set to: %s\n", liveData->settings.traccarServerHost);
+    }
+    else
+    {
+      syslog->printf("traccarServer: %s\n", liveData->settings.traccarServerHost);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("traccarPort") || key.equalsIgnoreCase("traccarServerPort"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.traccarServerPort = static_cast<uint16_t>(value.toInt());
+      saveSettings();
+      syslog->printf("traccarPort set to: %u\n", liveData->settings.traccarServerPort);
+    }
+    else
+    {
+      syslog->printf("traccarPort: %u\n", liveData->settings.traccarServerPort);
+    }
+    return true;
+  }
+
+  // MQTT
   if (key.equalsIgnoreCase("mqttEnabled"))
   {
-    liveData->settings.mqttEnabled = (value == "1" || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("on")) ? 1 : 0;
-    syslog->print("MQTT enabled set to: ");
-    syslog->println((liveData->settings.mqttEnabled == 1) ? "ON" : "OFF");
-    saveSettings();
-    disconnectMqtt(false);
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.mqttEnabled = b;
+        saveSettings();
+        syslog->printf("MQTT enabled set to: %s\n", (liveData->settings.mqttEnabled == 1) ? "ON" : "OFF");
+        disconnectMqtt(false);
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("MQTT enabled: %s\n", (liveData->settings.mqttEnabled == 1) ? "ON" : "OFF");
+    }
     return true;
   }
   if (key.equalsIgnoreCase("mqttHa") || key.equalsIgnoreCase("mqttHomeAssistant"))
   {
-    liveData->settings.mqttHomeAssistant = (value == "1" || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("on")) ? 1 : 0;
-    syslog->print("MQTT Home Assistant discovery set to: ");
-    syslog->println((liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
-    saveSettings();
-    if (liveData->settings.mqttHomeAssistant == 1)
+    if (isSetter)
     {
-      if (liveData->settings.mqttEnabled == 1)
+      int8_t b = parseBool(value);
+      if (b != -1)
       {
-        publishHomeAssistantDiscovery();
+        liveData->settings.mqttHomeAssistant = b;
+        saveSettings();
+        syslog->printf("MQTT Home Assistant discovery set to: %s\n", (liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
+        if (liveData->settings.mqttHomeAssistant == 1 && liveData->settings.mqttEnabled == 1)
+        {
+          publishHomeAssistantDiscovery();
+        }
       }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("MQTT Home Assistant discovery: %s\n", (liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
     }
     return true;
   }
   if (key.equalsIgnoreCase("mqttSecure") || key.equalsIgnoreCase("mqttTls") || key.equalsIgnoreCase("mqttUseTls"))
   {
-    liveData->settings.mqttUseTls = (value == "1" || value.equalsIgnoreCase("true") || value.equalsIgnoreCase("yes") || value.equalsIgnoreCase("on")) ? 1 : 0;
-    syslog->print("MQTT TLS/secure set to: ");
-    syslog->println((liveData->settings.mqttUseTls == 1) ? "ON" : "OFF");
-    saveSettings();
-    disconnectMqtt(false);
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.mqttUseTls = b;
+        saveSettings();
+        syslog->printf("MQTT TLS/secure set to: %s\n", (liveData->settings.mqttUseTls == 1) ? "ON" : "OFF");
+        disconnectMqtt(false);
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("MQTT TLS/secure: %s\n", (liveData->settings.mqttUseTls == 1) ? "ON" : "OFF");
+    }
     return true;
   }
   if (key.equalsIgnoreCase("mqttPort"))
   {
-    long port = value.toInt();
-    if (port < 0)
-      port = 0;
-    if (port > 65535)
-      port = 65535;
-    liveData->settings.mqttPort = static_cast<uint16_t>(port);
-    syslog->print("MQTT port set to: ");
-    if (liveData->settings.mqttPort == 0)
+    if (isSetter)
     {
-      syslog->println("0 (default)");
+      long port = value.toInt();
+      if (port < 0) port = 0;
+      if (port > 65535) port = 65535;
+      liveData->settings.mqttPort = static_cast<uint16_t>(port);
+      saveSettings();
+      syslog->print("MQTT port set to: ");
+      if (liveData->settings.mqttPort == 0)
+        syslog->println("0 (default)");
+      else
+        syslog->println(liveData->settings.mqttPort);
+      disconnectMqtt(false);
     }
     else
     {
-      syslog->println(liveData->settings.mqttPort);
+      syslog->print("MQTT port: ");
+      if (liveData->settings.mqttPort == 0)
+        syslog->printf("0 (default: %u)\n", (liveData->settings.mqttUseTls == 1) ? 8883 : 1883);
+      else
+        syslog->println(liveData->settings.mqttPort);
     }
-    saveSettings();
-    disconnectMqtt(false);
     return true;
   }
   if (key.equalsIgnoreCase("mqttServer"))
   {
-    value.toCharArray(liveData->settings.mqttServer, sizeof(liveData->settings.mqttServer));
-    syslog->print("MQTT server set to: ");
-    syslog->println(liveData->settings.mqttServer);
-    saveSettings();
-    disconnectMqtt(false);
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.mqttServer, sizeof(liveData->settings.mqttServer));
+      saveSettings();
+      syslog->printf("MQTT server set to: %s\n", liveData->settings.mqttServer);
+      disconnectMqtt(false);
+    }
+    else
+    {
+      syslog->printf("MQTT server: %s\n", liveData->settings.mqttServer);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("mqttId"))
   {
-    value.toCharArray(liveData->settings.mqttId, sizeof(liveData->settings.mqttId));
-    syslog->print("MQTT id set to: ");
-    syslog->println(liveData->settings.mqttId);
-    saveSettings();
-    disconnectMqtt(false);
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.mqttId, sizeof(liveData->settings.mqttId));
+      saveSettings();
+      syslog->printf("MQTT id set to: %s\n", liveData->settings.mqttId);
+      disconnectMqtt(false);
+    }
+    else
+    {
+      syslog->printf("MQTT id: %s\n", liveData->settings.mqttId);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("mqttUsername") || key.equalsIgnoreCase("mqttUser"))
   {
-    value.toCharArray(liveData->settings.mqttUsername, sizeof(liveData->settings.mqttUsername));
-    syslog->print("MQTT username set to: ");
-    syslog->println(liveData->settings.mqttUsername);
-    saveSettings();
-    disconnectMqtt(false);
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.mqttUsername, sizeof(liveData->settings.mqttUsername));
+      saveSettings();
+      syslog->printf("MQTT username set to: %s\n", liveData->settings.mqttUsername);
+      disconnectMqtt(false);
+    }
+    else
+    {
+      syslog->printf("MQTT username: %s\n", liveData->settings.mqttUsername);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("mqttPassword") || key.equalsIgnoreCase("mqttPasswd"))
   {
-    value.toCharArray(liveData->settings.mqttPassword, sizeof(liveData->settings.mqttPassword));
-    syslog->print("MQTT password set to: ");
-    syslog->println((strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
-    saveSettings();
-    disconnectMqtt(false);
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.mqttPassword, sizeof(liveData->settings.mqttPassword));
+      saveSettings();
+      syslog->printf("MQTT password set to: %s\n", (strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
+      disconnectMqtt(false);
+    }
+    else
+    {
+      syslog->printf("MQTT password: %s\n", (strlen(liveData->settings.mqttPassword) > 0) ? "******" : "(empty)");
+    }
     return true;
   }
   if (key.equalsIgnoreCase("mqttPubTopic") || key.equalsIgnoreCase("mqttTopic"))
   {
-    value.toCharArray(liveData->settings.mqttPubTopic, sizeof(liveData->settings.mqttPubTopic));
-    syslog->print("MQTT topic set to: ");
-    syslog->println(liveData->settings.mqttPubTopic);
-    saveSettings();
-    disconnectMqtt(false);
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.mqttPubTopic, sizeof(liveData->settings.mqttPubTopic));
+      saveSettings();
+      syslog->printf("MQTT topic set to: %s\n", liveData->settings.mqttPubTopic);
+      disconnectMqtt(false);
+    }
+    else
+    {
+      syslog->printf("MQTT topic: %s\n", liveData->settings.mqttPubTopic);
+    }
     return true;
   }
   if (key.equalsIgnoreCase("haName"))
   {
-    value.toCharArray(liveData->settings.haName, sizeof(liveData->settings.haName));
-    syslog->print("HA Name set to: ");
-    syslog->println((strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : "(unset, uses mqttId)");
-    saveSettings();
-    if (liveData->settings.mqttHomeAssistant == 1 && liveData->settings.mqttEnabled == 1)
+    if (isSetter)
     {
-      publishHomeAssistantDiscovery();
+      value.toCharArray(liveData->settings.haName, sizeof(liveData->settings.haName));
+      saveSettings();
+      syslog->printf("HA Name set to: %s\n", (strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : "(unset, uses mqttId)");
+      if (liveData->settings.mqttHomeAssistant == 1 && liveData->settings.mqttEnabled == 1)
+      {
+        publishHomeAssistantDiscovery();
+      }
+    }
+    else
+    {
+      syslog->printf("HA Name: %s\n", (strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : "(unset, uses mqttId)");
     }
     return true;
   }
   if (key.equalsIgnoreCase("haModel"))
   {
-    value.toCharArray(liveData->settings.haModel, sizeof(liveData->settings.haModel));
-    syslog->print("HA Model set to: ");
-    syslog->println((strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel : "(unset, uses mqttTopic)");
-    saveSettings();
-    if (liveData->settings.mqttHomeAssistant == 1 && liveData->settings.mqttEnabled == 1)
+    if (isSetter)
     {
-      publishHomeAssistantDiscovery();
-    }
-    return true;
-  }
-  if (key.equalsIgnoreCase("mqttInterval") || key.equalsIgnoreCase("remoteUploadIntervalSec"))
-  {
-    long interval = value.toInt();
-    if (interval < 0)
-      interval = 0;
-    if (interval > 3600)
-      interval = 3600;
-    liveData->settings.remoteUploadIntervalSec = static_cast<uint16_t>(interval);
-    syslog->print("MQTT upload interval set to: ");
-    if (liveData->settings.remoteUploadIntervalSec == 0)
-    {
-      syslog->println("0 (auto 60s)");
+      value.toCharArray(liveData->settings.haModel, sizeof(liveData->settings.haModel));
+      saveSettings();
+      syslog->printf("HA Model set to: %s\n", (strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel : "(unset, uses mqttTopic)");
+      if (liveData->settings.mqttHomeAssistant == 1 && liveData->settings.mqttEnabled == 1)
+      {
+        publishHomeAssistantDiscovery();
+      }
     }
     else
     {
-      syslog->printf("%u sec\n", liveData->settings.remoteUploadIntervalSec);
+      syslog->printf("HA Model: %s\n", (strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel : "(unset, uses mqttTopic)");
     }
-    saveSettings();
+    return true;
+  }
+  if (key.equalsIgnoreCase("mqttInterval"))
+  {
+    if (isSetter)
+    {
+      long interval = value.toInt();
+      if (interval < 0) interval = 0;
+      if (interval > 3600) interval = 3600;
+      liveData->settings.remoteUploadIntervalSec = static_cast<uint16_t>(interval);
+      saveSettings();
+      syslog->print("MQTT upload interval set to: ");
+      if (liveData->settings.remoteUploadIntervalSec == 0)
+        syslog->println("0 (auto 60s)");
+      else
+        syslog->printf("%u sec\n", liveData->settings.remoteUploadIntervalSec);
+    }
+    else
+    {
+      syslog->print("MQTT upload interval: ");
+      if (liveData->settings.remoteUploadIntervalSec == 0)
+        syslog->println("0 (auto 60s)");
+      else
+        syslog->printf("%u sec\n", liveData->settings.remoteUploadIntervalSec);
+    }
     return true;
   }
 
-  //
+  // Debug level
   if (key.equalsIgnoreCase("debugLevel"))
   {
-    if (value.equalsIgnoreCase("all") || value == "255")
+    if (isSetter)
     {
-      liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
-    }
-    else if (value.equalsIgnoreCase("none") || value.equalsIgnoreCase("off") || value == "0")
-    {
-      liveData->settings.debugLevel = DEBUG_NONE;
-    }
-    else if (value.indexOf(',') != -1 || value.startsWith("+") || value.startsWith("-"))
-    {
-      int start = 0;
-      while (start < value.length())
+      if (value.equalsIgnoreCase("all") || value == "255")
       {
-        int comma = value.indexOf(',', start);
-        String token = (comma == -1) ? value.substring(start) : value.substring(start, comma);
-        token.trim();
-        bool remove = token.startsWith("-");
-        if (token.startsWith("+") || token.startsWith("-"))
-          token = token.substring(1);
-        uint8_t bit = 0;
-        if (token.equalsIgnoreCase("comm"))
-          bit = DEBUG_COMM;
-        else if (token.equalsIgnoreCase("net") || token.equalsIgnoreCase("gsm"))
-          bit = DEBUG_NET;
-        else if (token.equalsIgnoreCase("sd") || token.equalsIgnoreCase("sdcard"))
-          bit = DEBUG_SDCARD;
-        else if (token.equalsIgnoreCase("gps"))
-          bit = DEBUG_GPS;
-        else if (token.equalsIgnoreCase("abrp"))
-          bit = DEBUG_ABRP;
-        else if (token.equalsIgnoreCase("all"))
-          bit = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
-        if (remove)
-          liveData->settings.debugLevel &= ~bit;
-        else
-          liveData->settings.debugLevel |= bit;
-        if (comma == -1)
-          break;
-        start = comma + 1;
+        liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
       }
-    }
-    else if (value.equalsIgnoreCase("comm"))
-    {
-      liveData->settings.debugLevel = DEBUG_COMM;
-    }
-    else if (value.equalsIgnoreCase("net") || value.equalsIgnoreCase("gsm"))
-    {
-      liveData->settings.debugLevel = DEBUG_NET;
-    }
-    else if (value.equalsIgnoreCase("sd") || value.equalsIgnoreCase("sdcard"))
-    {
-      liveData->settings.debugLevel = DEBUG_SDCARD;
-    }
-    else if (value.equalsIgnoreCase("gps"))
-    {
-      liveData->settings.debugLevel = DEBUG_GPS;
-    }
-    else if (value.equalsIgnoreCase("abrp"))
-    {
-      liveData->settings.debugLevel = DEBUG_ABRP;
+      else if (value.equalsIgnoreCase("none") || value.equalsIgnoreCase("off") || value == "0")
+      {
+        liveData->settings.debugLevel = DEBUG_NONE;
+      }
+      else if (value.indexOf(',') != -1 || value.startsWith("+") || value.startsWith("-"))
+      {
+        int start = 0;
+        while (start < value.length())
+        {
+          int comma = value.indexOf(',', start);
+          String token = (comma == -1) ? value.substring(start) : value.substring(start, comma);
+          token.trim();
+          bool remove = token.startsWith("-");
+          if (token.startsWith("+") || token.startsWith("-"))
+            token = token.substring(1);
+          uint8_t bit = 0;
+          if (token.equalsIgnoreCase("comm"))
+            bit = DEBUG_COMM;
+          else if (token.equalsIgnoreCase("net") || token.equalsIgnoreCase("gsm"))
+            bit = DEBUG_NET;
+          else if (token.equalsIgnoreCase("sd") || token.equalsIgnoreCase("sdcard"))
+            bit = DEBUG_SDCARD;
+          else if (token.equalsIgnoreCase("gps"))
+            bit = DEBUG_GPS;
+          else if (token.equalsIgnoreCase("abrp"))
+            bit = DEBUG_ABRP;
+          else if (token.equalsIgnoreCase("all"))
+            bit = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
+          if (remove)
+            liveData->settings.debugLevel &= ~bit;
+          else
+            liveData->settings.debugLevel |= bit;
+          if (comma == -1)
+            break;
+          start = comma + 1;
+        }
+      }
+      else if (value.equalsIgnoreCase("comm"))
+      {
+        liveData->settings.debugLevel = DEBUG_COMM;
+      }
+      else if (value.equalsIgnoreCase("net") || value.equalsIgnoreCase("gsm"))
+      {
+        liveData->settings.debugLevel = DEBUG_NET;
+      }
+      else if (value.equalsIgnoreCase("sd") || value.equalsIgnoreCase("sdcard"))
+      {
+        liveData->settings.debugLevel = DEBUG_SDCARD;
+      }
+      else if (value.equalsIgnoreCase("gps"))
+      {
+        liveData->settings.debugLevel = DEBUG_GPS;
+      }
+      else if (value.equalsIgnoreCase("abrp"))
+      {
+        liveData->settings.debugLevel = DEBUG_ABRP;
+      }
+      else
+      {
+        liveData->settings.debugLevel = value.toInt();
+      }
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      syslog->printf("Debug level set to: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
+                     liveData->settings.debugLevel,
+                     (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
     }
     else
     {
-      liveData->settings.debugLevel = value.toInt();
+      syslog->printf("Debug level bitmask: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
+                     liveData->settings.debugLevel,
+                     (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
     }
-    syslog->setDebugLevel(liveData->settings.debugLevel);
-    saveSettings();
-    syslog->printf("Debug level set to: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
-                   liveData->settings.debugLevel,
-                   (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
     return true;
   }
+
+  // Legacy OBD2 WiFi
+  if (key.equalsIgnoreCase("obd2WifiIp") || key.equalsIgnoreCase("obd2ip"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.obd2WifiIp, sizeof(liveData->settings.obd2WifiIp));
+      saveSettings();
+      syslog->printf("obd2WifiIp set to: %s\n", liveData->settings.obd2WifiIp);
+    }
+    else
+    {
+      syslog->printf("obd2WifiIp: %s\n", liveData->settings.obd2WifiIp);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("obd2WifiPort") || key.equalsIgnoreCase("obd2port"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.obd2WifiPort = static_cast<uint16_t>(value.toInt());
+      saveSettings();
+      syslog->printf("obd2WifiPort set to: %u\n", liveData->settings.obd2WifiPort);
+    }
+    else
+    {
+      syslog->printf("obd2WifiPort: %u\n", liveData->settings.obd2WifiPort);
+    }
+    return true;
+  }
+
+  // Time setter
   if (key.equalsIgnoreCase("setTime"))
   {
-    setTime(value);
+    if (isSetter)
+      setTime(value);
+    else
+      showTime();
     return true;
   }
-  // CAN comparer
+
+  // CAN comparer & record
   if (key.equalsIgnoreCase("record"))
   {
-    if (commInterface != nullptr)
+    if (isSetter && commInterface != nullptr)
       commInterface->recordLoop(value.toInt());
     return true;
   }
   if (key.equalsIgnoreCase("test"))
   {
-    if (carInterface != nullptr)
+    if (isSetter && carInterface != nullptr)
       carInterface->testHandler(value);
     return true;
   }
@@ -1508,52 +2630,103 @@ void BoardInterface::showHelp()
 {
   syslog->println("");
   syslog->println(".-[ HELP: Console commands ]-_.");
-  syslog->println("help           ... show console commands help (aliases: commands, ?)");
-  syslog->println("reboot         ... reboot device");
-  syslog->println("shutdown       ... shutdown device");
-  syslog->println("saveSettings   ... save current settings");
-  syslog->println("factoryReset   ... reset settings to defaults");
-  syslog->println("ipconfig       ... print network settings");
-  syslog->println("ABRP_debug     ... print ABRP user token");
-  syslog->println("debugLevel     ... print current debug level bitmask");
-  syslog->println("debugLevel=n   ... set debug level bitmask: 0=none, 1=comm, 2=net, 4=sd, 8=gps, 16=abrp (e.g. 9=comm+gps, all, none)");
-  syslog->println("wifiSsid=x     ... set primary AP ssid");
-  syslog->println("wifiPassword=x ... set primary AP password");
-  syslog->println("wifiSsid2=x    ... set 2nd AP ssid (replace primary wifi automatically in 1-2 minutes)");
-  syslog->println("wifiPassword2=x... set 2nd AP password");
-  syslog->println("wifiSsid3=x    ... set 3rd AP ssid");
-  syslog->println("wifiPassword3=x... set 3rd AP password");
-  syslog->println("wifiSsid4=x    ... set 4th AP ssid");
-  syslog->println("wifiPassword4=x... set 4th AP password");
-  syslog->println("apPassword     ... print current web log server AP password");
-  syslog->println("apPassword=x   ... set web log server AP password (min 8 alphanumeric chars)");
-  syslog->println("abrpApiToken=x ... set abrp api token for live data");
-  syslog->println("remoteApiUrl=x ... set remote api url");
-  syslog->println("remoteApiKey=x ... set remote api key");
-  syslog->println("testMqtt       ... test MQTT connection and send heartbeat now");
-  syslog->println("mqtt           ... print all MQTT settings");
-  syslog->println("mqttEnabled[=0|1] ... get/set MQTT upload");
-  syslog->println("mqttSecure[=0|1]  ... get/set MQTT TLS/SSL encryption");
-  syslog->println("mqttServer[=x] ... get/set MQTT server");
-  syslog->println("mqttPort[=x]   ... get/set MQTT port (0 = default 1883/8883)");
-  syslog->println("mqttId[=x]     ... get/set MQTT id");
-  syslog->println("mqttUsername[=x] ... get/set MQTT username");
-  syslog->println("mqttPassword[=x] ... get/set MQTT password");
-  syslog->println("mqttPubTopic[=x] ... get/set MQTT publish topic");
-  syslog->println("mqttHa[=0|1]      ... get/set Home Assistant MQTT autodiscovery");
-  syslog->println("serviceUUID=x  ... set device uuid for obd2 ble adapter");
-  syslog->println("charTxUUID=x   ... set tx uuid for obd2 ble adapter");
-  syslog->println("charRxUUID=x   ... set rx uuid for obd2 ble adapter");
-  syslog->println("bleAddressType ... print current BLE MAC address type");
-  syslog->println("bleAddressType=x ... set BLE MAC address type: random (0) or public (1)");
-  syslog->println("obd2ip=x       ... set ip for obd2 wifi adapter");
-  syslog->println("obd2port=x     ... set port for obd2 wifi adapter");
-  syslog->println("time           ... print current time");
-  syslog->println("ntpSync        ... sync Time with pool.ntp.org");
-  syslog->println("setTime=2022-12-30 05:00:00  ... set current time");
-  syslog->println("record=n       [n = 1..4]  ... record can response to buffer 1..4");
-  syslog->println("compare        ... compare buffers");
-  syslog->println("test=x         ... test handler");
+  syslog->println("System:");
+  syslog->println("  help / ?              ... show this help (alias: commands)");
+  syslog->println("  reboot / shutdown     ... reboot / deep sleep");
+  syslog->println("  saveSettings          ... save settings to EEPROM");
+  syslog->println("  factoryReset          ... reset settings to defaults");
+  syslog->println("  time                  ... print current time");
+  syslog->println("  setTime=YYYY-MM-DD HH:MM:SS ... set clock");
+  syslog->println("  ntpSync               ... sync time via NTP");
+  syslog->println("  ipconfig              ... print network status");
+  syslog->println("  debugLevel[=n|comm,net,sd,gps,abrp,all,none] ... get/set debug mask");
+  syslog->println("WiFi:");
+  syslog->println("  wifiEnabled[=0|1]     ... get/set WiFi enabled");
+  syslog->println("  wifiScan              ... scan and list WiFi APs");
+  syslog->println("  wifiConnect           ... trigger WiFi connection now");
+  syslog->println("  wifiSsid[=x]          ... get/set primary WiFi SSID");
+  syslog->println("  wifiPassword[=x]      ... get/set primary WiFi password");
+  syslog->println("  backupWifi[=0|1]      ... get/set backup WiFi enabled");
+  syslog->println("  wifiSsid2..4[=x]      ... get/set backup WiFi SSID (2..4)");
+  syslog->println("  wifiPassword2..4[=x]  ... get/set backup WiFi password (2..4)");
+  syslog->println("  apPassword[=x]        ... get/set web log server AP password");
+  syslog->println("  ntpEnabled[=0|1]      ... get/set NTP auto-sync");
+  syslog->println("Vehicle & Adapter:");
+  syslog->println("  cars                  ... list available car models & IDs");
+  syslog->println("  carType[=id|name]     ... get/set car type (reboot required)");
+  syslog->println("  commType[=0|1|ble|can]... get/set comm type (0=BLE, 1=CAN)");
+  syslog->println("  obdMac[=mac]          ... get/set OBD2 BLE MAC address");
+  syslog->println("  obd2Name[=name]       ... get/set OBD2 device display name");
+  syslog->println("  serviceUUID[=uuid]    ... get/set BLE service UUID");
+  syslog->println("  charTxUUID[=uuid]     ... get/set BLE Tx characteristic UUID");
+  syslog->println("  charRxUUID[=uuid]     ... get/set BLE Rx characteristic UUID");
+  syslog->println("  bleAddressType[=pub|rand] ... get/set BLE MAC address type");
+  syslog->println("  commandQueueAutoStop[=0|1] ... get/set CAN queue autostop");
+  syslog->println("  disableCommandOptimizer[=0|1] ... get/set command optimizer");
+  syslog->println("  mobileRelay[=0|1]     ... get/set mobile app BLE relay");
+  syslog->println("  mobileRelayPair       ... start mobile app pairing");
+  syslog->println("  mobileRelayForget     ... clear mobile app pairing");
+  syslog->println("  clearStats            ... clear driving & charging stats");
+  syslog->println("  loadTestData          ... load demo telemetry data");
+  syslog->println("Board & Settings:");
+  syslog->println("  boardPowerMode[=0|1]  ... get/set power mode (0=USB, 1=ext)");
+  syslog->println("  timezone[=n]          ... get/set timezone offset (-11..+14)");
+  syslog->println("  daylightSaving[=0|1]  ... get/set daylight saving time");
+  syslog->println("  distanceUnit[=k|m]    ... get/set unit: km or miles");
+  syslog->println("  temperatureUnit[=c|f] ... get/set unit: C or F");
+  syslog->println("  pressureUnit[=b|p]    ... get/set unit: bar or psi");
+  syslog->println("  defaultScreen[=n]     ... get/set default screen (1..6, 8)");
+  syslog->println("  displayRotation[=n]   ... get/set screen rotation (1 or 3)");
+  syslog->println("  lcdBrightness[=0..100]... get/set brightness (0=auto)");
+  syslog->println("  sleepMode[=0..2]      ... get/set sleep level (0=off,1=screen,2=deep)");
+  syslog->println("  serialConsolePort[=n] ... get/set serial console port (0, 255=off)");
+  syslog->println("  speedCorrection[=n]   ... get/set speed correction (-5..+5)");
+  syslog->println("  rightHandDrive[=0|1]  ... get/set right hand drive (RHD)");
+  syslog->println("Hardware modules:");
+  syslog->println("  sdcardEnabled[=0|1]   ... get/set SD card logging");
+  syslog->println("  sdcardConsoleLog[=0|1]... get/set console log to SD");
+  syslog->println("  sdcardAutstartLog[=0|1] ... get/set SD autostart log");
+  syslog->println("  sdcardStatus          ... check SD card mount status");
+  syslog->println("  gpsModuleType[=0..3]  ... get/set GPS (0=none,1=M8N,2=GNSS,3=v2.1)");
+  syslog->println("  gpsPort[=0|2|255]     ... get/set GPS hardware serial port");
+  syslog->println("  gpsSpeed[=baud]       ... get/set GPS baud rate");
+  syslog->println("  carSpeedType[=0..2]   ... get/set car speed (0=auto,1=car,2=gps)");
+  syslog->println("  voltmeterEnabled[=0|1]... get/set INA3221 voltmeter");
+  syslog->println("  voltmeterSleep[=0|1]  ... get/set voltmeter-based sleep");
+  syslog->println("  voltmeterSleepVol[=v] ... get/set voltmeter sleep voltage threshold");
+  syslog->println("  voltmeterWakeUpVol[=v]... get/set voltmeter wake-up voltage threshold");
+  syslog->println("  voltmeterCutOffVol[=v]... get/set voltmeter cut-off voltage threshold");
+  syslog->println("  voltmeterInfo         ... print current voltmeter readings");
+  syslog->println("Remote upload & MQTT:");
+  syslog->println("  remoteUploadIntervalSec[=s] ... get/set upload interval (0=disabled)");
+  syslog->println("  remoteUploadAbrpIntervalSec[=s] ... get/set ABRP interval");
+  syslog->println("  remoteApiUrl[=url]    ... get/set remote server URL");
+  syslog->println("  remoteApiKey[=key]    ... get/set remote server API key");
+  syslog->println("  abrpApiToken[=token]  ... get/set ABRP telemetry token");
+  syslog->println("  abrpSdcardLog[=0|1]   ... get/set log ABRP to SD");
+  syslog->println("  contributeData[=0|1]  ... get/set contribute to evdash.eu");
+  syslog->println("  contributeOnce        ... send contribute snapshot now");
+  syslog->println("  traccarEnabled[=0|1]  ... get/set Traccar client");
+  syslog->println("  traccarServer[=host]  ... get/set Traccar server host");
+  syslog->println("  traccarPort[=port]    ... get/set Traccar server port");
+  syslog->println("  mqtt                  ... show all MQTT settings");
+  syslog->println("  testMqtt              ... test MQTT connection & publish");
+  syslog->println("  mqttEnabled[=0|1]     ... get/set MQTT upload");
+  syslog->println("  mqttSecure[=0|1]      ... get/set MQTT TLS/SSL encryption");
+  syslog->println("  mqttServer[=host]     ... get/set MQTT server host");
+  syslog->println("  mqttPort[=port]       ... get/set MQTT port (0=auto 1883/8883)");
+  syslog->println("  mqttId[=id]           ... get/set MQTT client ID");
+  syslog->println("  mqttUsername[=user]   ... get/set MQTT username");
+  syslog->println("  mqttPassword[=pwd]    ... get/set MQTT password");
+  syslog->println("  mqttPubTopic[=topic]  ... get/set MQTT publish topic");
+  syslog->println("  mqttHa[=0|1]          ... get/set Home Assistant MQTT discovery");
+  syslog->println("  haName[=name]         ... get/set Home Assistant device name");
+  syslog->println("  haModel[=model]       ... get/set Home Assistant device model");
+  syslog->println("  mqttInterval[=sec]    ... get/set MQTT upload interval");
+  syslog->println("Diagnostics & CAN:");
+  syslog->println("  record=1..4           ... record CAN response buffer");
+  syslog->println("  compare               ... compare CAN buffers");
+  syslog->println("  test=x                ... run car test handler");
   syslog->println("__________________________________________________");
 }
 
