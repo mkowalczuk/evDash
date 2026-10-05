@@ -469,7 +469,7 @@ void BoardCore::mainLoop()
     gpsWakeConfirmCount = 0;
     gyroWakeConfirmCount = 0;
     liveData->continueWithCommandQueue();
-    if (commInterface->isSuspended())
+    if (commInterface != nullptr && commInterface->isSuspended())
     {
       commInterface->resumeDevice();
     }
@@ -571,7 +571,10 @@ void BoardCore::mainLoop()
        (liveData->params.auxVoltage > 3 && liveData->params.auxVoltage < 11.0)))
   {
     liveData->params.stopCommandQueue = true;
-    commInterface->suspendDevice();
+    if (commInterface != nullptr)
+    {
+      commInterface->suspendDevice();
+    }
     syslog->println("CAN Command queue stopped...");
   }
   updateGpsV21PpsMode();

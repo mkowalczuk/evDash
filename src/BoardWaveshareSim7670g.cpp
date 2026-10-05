@@ -38,19 +38,26 @@ void BoardWaveshareSim7670g::initBoard()
   }
 
 
-  // WiFi is the upload path for this board until the modem is wired up.
+}
+
+void BoardWaveshareSim7670g::afterSetup()
+{
+  BoardInterface::afterSetup();
+
+  // WiFi - started AFTER BLE so both subsystems are registered with coex
   if (!liveData->params.wifiApMode && liveData->settings.wifiEnabled == 1)
   {
     wifiSetup();
   }
 }
 
-void BoardWaveshareSim7670g::afterSetup()
-{
-}
-
 void BoardWaveshareSim7670g::commLoop()
 {
+  if (commInterface == nullptr || liveData->params.stopCommandQueue || commInterface->isSuspended())
+  {
+    return;
+  }
+  commInterface->mainLoop();
 }
 
 void BoardWaveshareSim7670g::boardLoop()
