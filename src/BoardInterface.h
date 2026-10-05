@@ -39,6 +39,8 @@ public:
   bool carCommandAllowed() { return carInterface->commandAllowed(); }
   void showTime();
   void showNet();
+  virtual void showGps();
+  virtual void initGPS() {}
   void showHelp();
   void processSerialConsole();
   virtual void setTime(String timestamp);

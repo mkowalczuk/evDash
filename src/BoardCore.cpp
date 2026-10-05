@@ -917,6 +917,30 @@ void BoardCore::syncContributeRelativeTimes(time_t offset)
   }
 }
 
+static time_t utcToEpoch(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds)
+{
+  if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || minute > 59 || seconds > 60)
+  {
+    return 0;
+  }
+
+  const uint32_t y = year;
+  uint32_t days = (y - 1970) * 365 + ((y - 1969) / 4) - ((y - 1901) / 100) + ((y - 1601) / 400);
+
+  static const uint16_t daysToMonth[12] = {0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334};
+  days += daysToMonth[month - 1];
+
+  const bool isLeap = (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0));
+  if (isLeap && month > 2)
+  {
+    days += 1;
+  }
+
+  days += (day - 1);
+
+  return static_cast<time_t>(days * 86400ULL + hour * 3600ULL + minute * 60ULL + seconds);
+}
+
 /**
  * Set the RTC time using the provided GPS time.
  * Converts the provided date/time components into a UNIX timestamp,
@@ -925,21 +949,40 @@ void BoardCore::syncContributeRelativeTimes(time_t offset)
  */
 void BoardCore::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds)
 {
-  liveData->params.currTimeSyncWithGps = true;
+  // Sanity check incoming GPS date and time values.
+  // GPS modules can output uninitialized/dummy dates (e.g. 2000-00-00 or 1980-01-06) before acquiring satellite lock.
+  if (year < 2024 || year > 2099 || month < 1 || month > 12 || day < 1 || day > 31 ||
+      hour > 23 || minute > 59 || seconds > 60)
+  {
+    if (liveData->settings.debugLevel & DEBUG_GPS)
+    {
+      syslog->printf("GPS time rejected: %04u-%02u-%02u %02u:%02u:%02u is not a valid date\n",
+                     year, month, day, hour, minute, seconds);
+    }
+    return;
+  }
 
-  struct tm tm = {0};
-  tm.tm_year = year - 1900;
-  tm.tm_mon = month - 1;
-  tm.tm_mday = day;
-  tm.tm_hour = hour;
-  tm.tm_min = minute;
-  tm.tm_sec = seconds;
-  time_t t = mktime(&tm);
-  syslog->printf("%02d%02d%02d%02d%02d%02d\n", year - 2000, month, day, hour, minute, seconds);
-  struct timeval now = {.tv_sec = t};
+  time_t t = utcToEpoch(year, month, day, hour, minute, seconds);
+  if (t < 1704067200) // 2024-01-01 00:00:00 UTC
+  {
+    return;
+  }
+
+  struct timeval now = {.tv_sec = t, .tv_usec = 0};
   settimeofday(&now, NULL);
-  syncTimes(t);
 
+  struct tm check;
+  if (!getLocalTime(&check, 50))
+  {
+    syslog->println("GPS time set rejected by system clock.");
+    return;
+  }
+
+  liveData->params.currTimeSyncWithGps = true;
+  syslog->printf("[GPS] System time synced: %04u-%02u-%02u %02u:%02u:%02u UTC\n",
+                 year, month, day, hour, minute, seconds);
+
+  syncTimes(t);
   rtcWriteTime(t);
 }
 
@@ -1151,13 +1194,30 @@ void BoardCore::syncGPS()
 
   // Synchronize time with GPS if it has not been synchronized yet.
   // When NTP is enabled, wait for the NTP priority window to expire before falling back to GPS time.
-  if (!liveData->params.currTimeSyncWithGps && gps.date.isValid() && gps.time.isValid())
+  // Validate calendar components: many GPS modules stream uninitialized dummy dates (e.g. 2000-00-00) before lock.
+  if (!liveData->params.currTimeSyncWithGps &&
+      gps.date.isValid() && gps.time.isValid() &&
+      gps.date.year() >= 2024 && gps.date.year() <= 2099 &&
+      gps.date.month() >= 1 && gps.date.month() <= 12 &&
+      gps.date.day() >= 1 && gps.date.day() <= 31)
   {
     if (liveData->settings.ntpEnabled == 0 || liveData->params.ntpTimeSet || gpsTimeFallbackAllowed)
     {
       setGpsTime(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
     }
   }
+}
+
+/**
+ * Show GPS diagnostics and TinyGPSPlus statistics
+ */
+void BoardCore::showGps()
+{
+  BoardInterface::showGps();
+  syslog->printf("Chars Processed:  %u\n", (uint32_t)gps.charsProcessed());
+  syslog->printf("Sentences (Fix):  %u\n", (uint32_t)gps.sentencesWithFix());
+  syslog->printf("Checksum Pass:    %u\n", (uint32_t)gps.passedChecksum());
+  syslog->printf("Checksum Fail:    %u\n", (uint32_t)gps.failedChecksum());
 }
 
 const char *BoardCore::getWifiDisconnectReasonStr(uint8_t reason)

@@ -62,6 +62,54 @@ void BoardWaveshareSim7670g::commLoop()
 
 void BoardWaveshareSim7670g::boardLoop()
 {
+  if (modemUart == nullptr)
+  {
+    return;
+  }
+
+  const bool allowGps = !(liveData->params.stopCommandQueue && liveData->settings.voltmeterEnabled == 1);
+  if (!allowGps)
+  {
+    return;
+  }
+
+  if (modemUart->available())
+  {
+    do
+    {
+      int ch = modemUart->read();
+      if (ch != -1)
+      {
+        syslog->infoNolf(DEBUG_GPS, char(ch));
+        gps.encode(ch);
+      }
+    } while (modemUart->available());
+    syncGPS();
+  }
+}
+
+void BoardWaveshareSim7670g::initGPS()
+{
+  if (!modemReady && modemUart == nullptr)
+  {
+    modemBegin();
+    return;
+  }
+
+  syslog->println("SIM7670G: enabling GNSS...");
+  modemSendCommand("AT+CGNSSPWR=1", 1000);
+  delay(50);
+  modemSendCommand("AT+CGNSSTST=1", 1000);
+  delay(50);
+  modemSendCommand("AT+CGNSSPORTSWITCH=0,1", 1000);
+}
+
+void BoardWaveshareSim7670g::showGps()
+{
+  BoardCore::showGps();
+  syslog->printf("Modem Hardware:   SIM7670G on UART%u (GPIO%d RX, GPIO%d TX, %d baud)\n",
+                 kModemUartNum, kModemRxPin, kModemTxPin, kModemBaud);
+  syslog->printf("Modem Responding: %s\n", modemReady ? "YES" : "NO");
 }
 
 /**
@@ -128,12 +176,7 @@ bool BoardWaveshareSim7670g::modemBegin()
   if (modemReady)
   {
     syslog->println("SIM7670G: AT UART responding");
-    // Enable GNSS over AT per plan (iteration 2.4)
-    modemSendCommand("AT+CGNSSPWR=1", 1000);
-    delay(50);
-    modemSendCommand("AT+CGNSSTST=1", 1000);
-    delay(50);
-    modemSendCommand("AT+CGNSSPORTSWITCH=0,1", 1000);
+    initGPS();
   }
   else
   {
