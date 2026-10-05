@@ -16,7 +16,8 @@ namespace Traccar
                     float headingDeg,
                     float socPercent,
                     bool charging,
-                    int &outHttpCode)
+                    int &outHttpCode,
+                    WiFiClient *client)
   {
     outHttpCode = -1;
 
@@ -47,10 +48,11 @@ namespace Traccar
       return false;
     }
 
-    WiFiClient client;
+    WiFiClient fallbackClient;
+    WiFiClient *netClient = (client != nullptr) ? client : &fallbackClient;
     HTTPClient http;
 
-    if (!http.begin(client, url))
+    if (!http.begin(*netClient, url))
     {
       return false;
     }

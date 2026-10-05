@@ -77,6 +77,17 @@ public:
   void setUrcHandler(UrcHandler handler) { urcHandler = handler; }
   void setReadyCallback(ReadyCallback callback) { readyCallback = callback; }
 
+  static constexpr uint8_t kMaxSockets = 2; // link 0: HTTP/API, link 1: MQTT
+
+  bool openSocket(uint8_t linkId, const char *host, uint16_t port, bool secure, uint32_t timeoutMs);
+  bool closeSocket(uint8_t linkId, bool secure, uint32_t timeoutMs);
+  size_t sendSocketData(uint8_t linkId, const uint8_t *data, size_t len, bool secure, uint32_t timeoutMs);
+  int readSocketData(uint8_t linkId, uint8_t *buf, size_t maxLen, bool secure, uint32_t timeoutMs);
+  bool isSocketConnected(uint8_t linkId) const { return (linkId < kMaxSockets) && socketConnected[linkId]; }
+  bool isSocketDataPending(uint8_t linkId) const { return (linkId < kMaxSockets) && socketDataPending[linkId]; }
+  bool resolveHost(const char *host, IPAddress &out);
+  bool sendSync(const String &command, uint32_t timeoutMs, String *outResponse = nullptr);
+
   State state() const { return currentState; }
   const char *stateName() const;
   bool responding() const { return everResponded; }
@@ -127,6 +138,31 @@ private:
   bool netOpenPending = false;
   uint32_t netOpenSentMs = 0;
   bool apnWarned = false;
+  bool wasDataEnabled = false;
+  bool readyCallbackCalled = false;
+
+  // Socket state
+  bool socketConnected[kMaxSockets] = {false, false};
+  bool socketDataPending[kMaxSockets] = {false, false};
+  bool socketOpenDone[kMaxSockets] = {false, false};
+  int socketOpenResult[kMaxSockets] = {-1, -1};
+
+  // Synchronous command execution support
+  bool syncWaiting = false;
+  bool syncSuccess = false;
+  String syncResponseBuffer;
+  bool promptWaiting = false;
+
+  // Raw socket receive state
+  bool rawRxMode = false;
+  uint8_t *rawRxTarget = nullptr;
+  size_t rawRxTargetMax = 0;
+  size_t rawRxExpected = 0;
+  size_t rawRxReceived = 0;
+
+  // DNS resolution state
+  bool dnsResolved = false;
+  IPAddress dnsResolvedIp;
 
   void readUart();
   void handleLine(const String &line);

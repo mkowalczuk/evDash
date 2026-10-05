@@ -129,9 +129,16 @@ void BoardWaveshareSim7670g::modemInfo()
   syslog->printf("State:         %s\n", modem.stateName());
   syslog->printf("Data enabled:  %s\n", (liveData->settings.modemEnabled == 1) ? "YES" : "NO (run 'modemEnabled=1')");
   syslog->printf("IMEI:          %s\n", info.imei.length() > 0 ? info.imei.c_str() : "unknown");
-  syslog->printf("Firmware:      %s\n", info.firmware.length() > 0 ? info.firmware.c_str() : "unknown");
-  syslog->printf("SIM:           %s\n", info.simReady ? "ready" : "not ready");
-  syslog->printf("Registration:  %s\n", registrationText(info.registration));
+  if (liveData->settings.modemEnabled == 1)
+  {
+    syslog->printf("SIM:           %s\n", info.simReady ? "ready" : "not ready");
+    syslog->printf("Registration:  %s\n", registrationText(info.registration));
+  }
+  else
+  {
+    syslog->println("SIM:           disabled (cellular off)");
+    syslog->println("Registration:  disabled (cellular off)");
+  }
   syslog->printf("Operator:      %s\n", info.operatorName.length() > 0 ? info.operatorName.c_str() : "unknown");
   if (info.rssiDbm != 0)
   {
@@ -192,8 +199,10 @@ void BoardWaveshareSim7670g::modemBegin()
   modem.setNmeaSink([this](char ch)
                     {
                       syslog->infoNolf(DEBUG_GPS, ch);
-                      gps.encode(ch);
-                      gpsFed = true;
+                      if (gps.encode(ch))
+                      {
+                        gpsFed = true;
+                      }
                     });
   modem.setReadyCallback([this]()
                          {
@@ -217,6 +226,50 @@ bool BoardWaveshareSim7670g::sdBegin()
     return false;
   }
   return true;
+}
+
+NetTransport *BoardWaveshareSim7670g::activeTransport()
+{
+  if (liveData == nullptr)
+  {
+    return &wifiTransport;
+  }
+
+  switch (liveData->settings.modemTransportPolicy)
+  {
+  case 1: // Cellular preferred
+    if (modemTransport.ready())
+    {
+      return &modemTransport;
+    }
+    if (wifiTransport.ready())
+    {
+      return &wifiTransport;
+    }
+    return &modemTransport;
+
+  case 2: // Cellular only
+    return &modemTransport;
+
+  case 3: // WiFi only
+    return &wifiTransport;
+
+  case 0: // WiFi preferred (default)
+  default:
+    if (wifiTransport.ready())
+    {
+      return &wifiTransport;
+    }
+    if (modemTransport.ready())
+    {
+      return &modemTransport;
+    }
+    if (liveData->settings.wifiEnabled == 1)
+    {
+      return &wifiTransport;
+    }
+    return &modemTransport;
+  }
 }
 
 #endif // BOARD_WAVESHARE_SIM7670G

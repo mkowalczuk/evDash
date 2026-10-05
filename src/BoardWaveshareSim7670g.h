@@ -2,6 +2,7 @@
 
 #include "BoardCore.h"
 #include "Sim7670G.h"
+#include "ModemTransport.h"
 #include <SD_MMC.h>
 #include <SPI.h>
 #include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
@@ -35,6 +36,8 @@
 class BoardWaveshareSim7670g : public BoardCore
 {
 public:
+  BoardWaveshareSim7670g() : modemTransport(&modem) {}
+
   const char *hardwareModelName() override { return "Sim7670G"; }
   uint8_t hardwareIdTag() const override { return 0x04U; }
   bool sdBegin() override;
@@ -47,6 +50,7 @@ public:
   void modemInfo() override;
   void modemReset() override;
   void modemTest() override;
+  NetTransport *activeTransport() override;
 
 private:
   // Opens the AT UART and hands it to the modem driver. The driver probes the
@@ -58,6 +62,7 @@ private:
   // not gpsHwUart.
   HardwareSerial *modemUart = nullptr;
   Sim7670G modem;
+  ModemTransport modemTransport;
   bool gpsFed = false;
   SFE_MAX1704X max17048;
 };

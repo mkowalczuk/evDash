@@ -26,6 +26,7 @@ It handles attaching communications and live data objects. And provides methods 
 #define ARDUINOJSON_USE_LONG_LONG 1
 
 #include <WiFi.h>
+#include "NetTransport.h"
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include "ble_compat.h"
@@ -827,10 +828,10 @@ bool BoardInterface::customConsoleCommand(String cmd)
 
   if (cmd.equalsIgnoreCase("testMqtt") || cmd.equalsIgnoreCase("sendMqtt"))
   {
-    if (WiFi.status() != WL_CONNECTED)
+    NetTransport *trans = activeTransport();
+    if (trans != nullptr ? !trans->ready() : (WiFi.status() != WL_CONNECTED))
     {
-      syslog->print("WiFi not connected. Status: ");
-      syslog->println(WiFi.status());
+      syslog->printf("Network transport not ready (%s).\n", trans ? trans->name() : "None");
       return true;
     }
     bool tempEnabled = false;
@@ -2865,7 +2866,17 @@ bool BoardInterface::serializeParamsToJson(String &outJson, bool inclApiKey)
  */
 void BoardInterface::showNet()
 {
+  NetTransport *trans = activeTransport();
   syslog->println(".-[ Network Status ]-_.");
+  if (trans != nullptr)
+  {
+    syslog->printf("Active transport: %s (%s)\n", trans->name(), trans->ready() ? "READY" : "NOT READY");
+    if (trans->ready())
+    {
+      syslog->printf("Transport IP:     %s\n", trans->ipAddress().c_str());
+      syslog->printf("Signal (RSSI):    %d dBm\n", trans->rssi());
+    }
+  }
   syslog->printf("WiFi enabled: %s\n", (liveData->settings.wifiEnabled == 1) ? "YES" : "NO (run 'wifiEnabled=1' to turn on)");
 
   const char *statusStr = "UNKNOWN";
@@ -3141,7 +3152,16 @@ void BoardInterface::calcAutomaticBrightnessLatLon()
 {
   if (liveData->settings.lcdBrightness == 0) // only for automatic mode
   {
-    if (liveData->params.lcdBrightnessCalc == -1 && liveData->params.gpsLat != -1.0 && liveData->params.gpsLon != -1.0)
+    if (liveData->params.currentTime < 1700000000)
+    {
+      return;
+    }
+    if (liveData->params.gpsLat == -1.0 || liveData->params.gpsLon == -1.0)
+    {
+      return;
+    }
+
+    if (liveData->params.lcdBrightnessCalc == -1)
     {
       initSolarCalc(liveData->settings.timezone, liveData->params.gpsLat, liveData->params.gpsLon);
     }

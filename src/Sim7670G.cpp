@@ -11,7 +11,8 @@ static constexpr uint32_t kStatusPollConnectedMs = 10000;
 // Unsolicited result codes. They can arrive in the middle of a command's reply,
 // so they have to be recognised by prefix and kept out of the response buffer.
 static const char *const kUrcPrefixes[] = {
-    "+CIPRX", "+CMQTTRX", "+CGNSSINFO", "+CGEV", "+NETOPEN", "+CIPEVENT", "+CMQTTCONNLOST", "RDY", "PB DONE"};
+    "+CIPRX", "+CMQTTRX", "+CGNSSINFO", "+CGEV", "+NETOPEN", "+CIPEVENT", "+CMQTTCONNLOST",
+    "+CIPOPEN", "+CCHOPEN", "+CCHCLOSE", "+CIPCLOSE", "+CDNSGIP", "+CCHRECV", "RDY", "PB DONE"};
 
 void Sim7670G::begin(HardwareSerial *serial, LiveData *data)
 {
@@ -47,6 +48,8 @@ void Sim7670G::reset()
   nextActionMs = 0;
   netOpenPending = false;
   apnWarned = false;
+  wasDataEnabled = (liveData != nullptr) && dataEnabled();
+  readyCallbackCalled = false;
   modemInfo = Info();
   if (uart != nullptr)
   {
@@ -56,6 +59,20 @@ void Sim7670G::reset()
     }
   }
   currentState = (uart != nullptr) ? STATE_INIT : STATE_OFF;
+  for (uint8_t i = 0; i < kMaxSockets; i++)
+  {
+    socketConnected[i] = false;
+    socketDataPending[i] = false;
+    socketOpenDone[i] = false;
+    socketOpenResult[i] = -1;
+  }
+  syncWaiting = false;
+  syncSuccess = false;
+  promptWaiting = false;
+  rawRxMode = false;
+  rawRxExpected = 0;
+  rawRxReceived = 0;
+  dnsResolved = false;
 }
 
 bool Sim7670G::send(const String &command, uint32_t timeoutMs, ResponseCallback callback)
@@ -97,6 +114,26 @@ void Sim7670G::readUart()
       break;
     }
     const char ch = static_cast<char>(raw);
+
+    if (promptWaiting && ch == '>')
+    {
+      promptWaiting = false;
+      continue;
+    }
+
+    if (rawRxMode && rawRxExpected > 0)
+    {
+      if (rawRxReceived < rawRxTargetMax && rawRxTarget != nullptr)
+      {
+        rawRxTarget[rawRxReceived] = static_cast<uint8_t>(raw);
+      }
+      rawRxReceived++;
+      if (rawRxReceived >= rawRxExpected)
+      {
+        rawRxExpected = 0;
+      }
+      continue;
+    }
 
     if (atLineStart && ch == '$')
     {
@@ -214,6 +251,65 @@ void Sim7670G::handleLine(const String &line)
     return;
   }
 
+  if (syncWaiting)
+  {
+    bool ok = false;
+    if (isFinalResult(line, ok))
+    {
+      syncSuccess = ok;
+      syncWaiting = false;
+      return;
+    }
+    if (isUrc(line))
+    {
+      handleUrc(line);
+      return;
+    }
+    if (rawRxMode && rawRxExpected == 0)
+    {
+      if (line.startsWith("+CIPRXGET: 2,"))
+      {
+        int firstComma = line.indexOf(',');
+        int secondComma = line.indexOf(',', firstComma + 1);
+        int thirdComma = line.indexOf(',', secondComma + 1);
+        if (firstComma > 0 && secondComma > 0)
+        {
+          int len = (thirdComma > 0) ? line.substring(secondComma + 1, thirdComma).toInt()
+                                     : line.substring(secondComma + 1).toInt();
+          rawRxExpected = (len > 0) ? static_cast<size_t>(len) : 0;
+          if (rawRxExpected == 0)
+          {
+            rawRxMode = false;
+          }
+          return;
+        }
+      }
+      else if (line.startsWith("+CCHRECV:"))
+      {
+        int lastComma = line.lastIndexOf(',');
+        if (lastComma > 0)
+        {
+          int len = line.substring(lastComma + 1).toInt();
+          rawRxExpected = (len > 0) ? static_cast<size_t>(len) : 0;
+          if (rawRxExpected == 0)
+          {
+            rawRxMode = false;
+          }
+          return;
+        }
+      }
+    }
+    if (syncResponseBuffer.length() + line.length() + 1 < kMaxResponse)
+    {
+      if (syncResponseBuffer.length() > 0)
+      {
+        syncResponseBuffer += '\n';
+      }
+      syncResponseBuffer += line;
+    }
+    return;
+  }
+
   handleUrc(line);
 }
 
@@ -250,6 +346,79 @@ void Sim7670G::handleUrc(const String &line)
     if (currentState != STATE_INIT)
     {
       setState(STATE_INIT);
+    }
+  }
+  else if (line.startsWith("+CIPOPEN:"))
+  {
+    int comma = line.indexOf(',');
+    if (comma > 0)
+    {
+      int linkId = line.substring(9, comma).toInt();
+      int err = line.substring(comma + 1).toInt();
+      if (linkId >= 0 && linkId < kMaxSockets)
+      {
+        socketOpenDone[linkId] = true;
+        socketOpenResult[linkId] = err;
+        if (err == 0)
+        {
+          socketConnected[linkId] = true;
+        }
+      }
+    }
+  }
+  else if (line.startsWith("+CCHOPEN:"))
+  {
+    int comma = line.indexOf(',');
+    if (comma > 0)
+    {
+      int linkId = line.substring(9, comma).toInt();
+      int err = line.substring(comma + 1).toInt();
+      if (linkId >= 0 && linkId < kMaxSockets)
+      {
+        socketOpenDone[linkId] = true;
+        socketOpenResult[linkId] = err;
+        if (err == 0)
+        {
+          socketConnected[linkId] = true;
+        }
+      }
+    }
+  }
+  else if (line.startsWith("+CIPCLOSE:"))
+  {
+    int linkId = line.substring(10).toInt();
+    if (linkId >= 0 && linkId < kMaxSockets)
+    {
+      socketConnected[linkId] = false;
+    }
+  }
+  else if (line.startsWith("+CCHCLOSE:"))
+  {
+    int linkId = line.substring(10).toInt();
+    if (linkId >= 0 && linkId < kMaxSockets)
+    {
+      socketConnected[linkId] = false;
+    }
+  }
+  else if (line.startsWith("+CIPRXGET: 1,"))
+  {
+    int linkId = line.substring(13).toInt();
+    if (linkId >= 0 && linkId < kMaxSockets)
+    {
+      socketDataPending[linkId] = true;
+    }
+  }
+  else if (line.startsWith("+CDNSGIP: 1,"))
+  {
+    int lastQuote = line.lastIndexOf('"');
+    int secondLastQuote = line.lastIndexOf('"', lastQuote - 1);
+    if (lastQuote > secondLastQuote && secondLastQuote >= 0)
+    {
+      String ipStr = line.substring(secondLastQuote + 1, lastQuote);
+      if (dnsResolvedIp.fromString(ipStr))
+      {
+        dnsResolved = true;
+      }
     }
   }
 
@@ -377,6 +546,17 @@ void Sim7670G::setState(State next)
  */
 void Sim7670G::tick()
 {
+  if (liveData != nullptr)
+  {
+    const bool currentDataEnabled = dataEnabled();
+    if (currentDataEnabled != wasDataEnabled)
+    {
+      wasDataEnabled = currentDataEnabled;
+      reset();
+      return;
+    }
+  }
+
   if (stepBusy || commandInFlight || !queue.empty())
   {
     return;
@@ -401,8 +581,9 @@ void Sim7670G::stepInit()
   if (initStep >= 7)
   {
     setState(STATE_READY);
-    if (readyCallback)
+    if (readyCallback && !readyCallbackCalled)
     {
+      readyCallbackCalled = true;
       readyCallback();
     }
     return;
@@ -418,7 +599,13 @@ void Sim7670G::stepInit()
            stepBusy = false;
            if (ok)
            {
-             initStep = 1;
+             if (readyCallback && !readyCallbackCalled)
+             {
+               readyCallbackCalled = true;
+               readyCallback();
+             }
+             // If cellular data is disabled, skip SIM/APN setup and query hardware info.
+             initStep = dataEnabled() ? 1 : 2;
            }
            else
            {
@@ -478,7 +665,7 @@ void Sim7670G::stepInit()
                }
              }
              modemInfo.firmware = line;
-             initStep = 4;
+             initStep = dataEnabled() ? 4 : 7;
            }
            else
            {
@@ -548,7 +735,12 @@ void Sim7670G::stepInit()
 
 void Sim7670G::stepReady()
 {
-  if (dataEnabled() && registered())
+  if (!dataEnabled())
+  {
+    nextActionMs = millis() + kStatusPollMs;
+    return;
+  }
+  if (registered())
   {
     setState(STATE_REGISTERED);
     return;
@@ -558,7 +750,7 @@ void Sim7670G::stepReady()
 
 void Sim7670G::stepRegistered()
 {
-  if (!registered())
+  if (!dataEnabled() || !registered())
   {
     setState(STATE_READY);
     return;
@@ -612,7 +804,7 @@ void Sim7670G::stepRegistered()
 
 void Sim7670G::stepNetOpen()
 {
-  if (!registered())
+  if (!dataEnabled() || !registered())
   {
     setState(STATE_READY);
     return;
@@ -776,4 +968,265 @@ String Sim7670G::firstLine(const String &text)
   return line;
 }
 
+bool Sim7670G::sendSync(const String &command, uint32_t timeoutMs, String *outResponse)
+{
+  if (uart == nullptr)
+  {
+    return false;
+  }
+
+  // Drain any asynchronous command that was already queued/in-flight
+  uint32_t drainStartMs = millis();
+  while (commandInFlight && (millis() - drainStartMs < 2000))
+  {
+    readUart();
+    checkTimeout();
+    tick();
+  }
+
+  syncResponseBuffer = "";
+  syncSuccess = false;
+  syncWaiting = true;
+  totalCommands++;
+
+  syslog->info(DEBUG_NET, String("MODEM [sync] > ") + command);
+  uart->print(command);
+  uart->print("\r\n");
+
+  uint32_t startMs = millis();
+  while (syncWaiting && (millis() - startMs < timeoutMs))
+  {
+    readUart();
+  }
+
+  bool ok = false;
+  if (syncWaiting)
+  {
+    syncWaiting = false;
+    totalTimeouts++;
+    syslog->info(DEBUG_NET, String("MODEM [sync] timeout: ") + command);
+  }
+  else
+  {
+    ok = syncSuccess;
+    everResponded = true;
+  }
+
+  if (outResponse != nullptr)
+  {
+    *outResponse = syncResponseBuffer;
+  }
+
+  return ok;
+}
+
+bool Sim7670G::openSocket(uint8_t linkId, const char *host, uint16_t port, bool secure, uint32_t timeoutMs)
+{
+  if (currentState != STATE_NET_OPEN || host == nullptr || port == 0 || linkId >= kMaxSockets)
+  {
+    return false;
+  }
+
+  if (socketConnected[linkId])
+  {
+    closeSocket(linkId, secure, 1000);
+  }
+
+  socketOpenDone[linkId] = false;
+  socketOpenResult[linkId] = -1;
+
+  if (secure)
+  {
+    sendSync("AT+CSSLCFG=\"sslversion\",0,4", 1000);
+    sendSync(String("AT+CSSLCFG=\"authmode\",0,") + ((liveData && liveData->settings.modemTlsInsecure == 0) ? "1" : "0"), 1000);
+    sendSync("AT+CSSLCFG=\"enableSNI\",0,1", 1000);
+    sendSync(String("AT+CCHSSLCFG=") + linkId + ",0", 1000);
+    sendSync("AT+CCHSTART", 2000);
+
+    String cmd = String("AT+CCHOPEN=") + linkId + ",\"" + host + "\"," + port + ",2";
+    if (!sendSync(cmd, timeoutMs))
+    {
+      return false;
+    }
+  }
+  else
+  {
+    sendSync("AT+CIPRXGET=1", 1000);
+    String cmd = String("AT+CIPOPEN=") + linkId + ",\"TCP\",\"" + host + "\"," + port;
+    if (!sendSync(cmd, timeoutMs))
+    {
+      return false;
+    }
+  }
+
+  uint32_t startMs = millis();
+  while (!socketOpenDone[linkId] && (millis() - startMs < timeoutMs))
+  {
+    readUart();
+  }
+
+  if (socketOpenDone[linkId] && socketOpenResult[linkId] == 0)
+  {
+    socketConnected[linkId] = true;
+    socketDataPending[linkId] = false;
+    return true;
+  }
+
+  socketConnected[linkId] = false;
+  return false;
+}
+
+bool Sim7670G::closeSocket(uint8_t linkId, bool secure, uint32_t timeoutMs)
+{
+  if (linkId >= kMaxSockets)
+  {
+    return false;
+  }
+  socketConnected[linkId] = false;
+  socketDataPending[linkId] = false;
+  if (secure)
+  {
+    return sendSync(String("AT+CCHCLOSE=") + linkId, timeoutMs);
+  }
+  else
+  {
+    return sendSync(String("AT+CIPCLOSE=") + linkId, timeoutMs);
+  }
+}
+
+size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len, bool secure, uint32_t timeoutMs)
+{
+  if (!socketConnected[linkId] || data == nullptr || len == 0 || linkId >= kMaxSockets)
+  {
+    return 0;
+  }
+
+  size_t sentTotal = 0;
+  const size_t kMaxChunk = 1024;
+
+  while (sentTotal < len)
+  {
+    const size_t chunkSize = (len - sentTotal > kMaxChunk) ? kMaxChunk : (len - sentTotal);
+    String cmd = secure ? (String("AT+CCHSEND=") + linkId + "," + chunkSize)
+                        : (String("AT+CIPSEND=") + linkId + "," + chunkSize);
+
+    promptWaiting = true;
+    uart->print(cmd);
+    uart->print("\r\n");
+
+    uint32_t startMs = millis();
+    bool gotPrompt = false;
+    while (millis() - startMs < timeoutMs)
+    {
+      readUart();
+      if (!promptWaiting)
+      {
+        gotPrompt = true;
+        break;
+      }
+    }
+
+    if (!gotPrompt)
+    {
+      promptWaiting = false;
+      break;
+    }
+
+    uart->write(data + sentTotal, chunkSize);
+
+    bool ok = false;
+    startMs = millis();
+    syncWaiting = true;
+    syncResponseBuffer = "";
+    while (millis() - startMs < timeoutMs)
+    {
+      readUart();
+      if (!syncWaiting)
+      {
+        ok = syncSuccess;
+        break;
+      }
+    }
+    syncWaiting = false;
+
+    if (!ok)
+    {
+      break;
+    }
+
+    sentTotal += chunkSize;
+  }
+
+  return sentTotal;
+}
+
+int Sim7670G::readSocketData(uint8_t linkId, uint8_t *buf, size_t maxLen, bool secure, uint32_t timeoutMs)
+{
+  if (!socketConnected[linkId] || buf == nullptr || maxLen == 0 || linkId >= kMaxSockets)
+  {
+    return 0;
+  }
+
+  size_t fetchLen = (maxLen > 1024) ? 1024 : maxLen;
+  String cmd = secure ? (String("AT+CCHRECV=") + linkId + "," + fetchLen)
+                      : (String("AT+CIPRXGET=2,") + linkId + "," + fetchLen);
+
+  rawRxTarget = buf;
+  rawRxTargetMax = maxLen;
+  rawRxExpected = 0;
+  rawRxReceived = 0;
+  rawRxMode = true;
+
+  uart->print(cmd);
+  uart->print("\r\n");
+
+  uint32_t startMs = millis();
+  while (rawRxMode && (millis() - startMs < timeoutMs))
+  {
+    readUart();
+  }
+  rawRxMode = false;
+
+  return rawRxReceived;
+}
+
+bool Sim7670G::resolveHost(const char *host, IPAddress &out)
+{
+  if (host == nullptr || host[0] == '\0')
+  {
+    return false;
+  }
+  if (out.fromString(host))
+  {
+    return true;
+  }
+  if (currentState != STATE_NET_OPEN)
+  {
+    return false;
+  }
+
+  dnsResolved = false;
+  dnsResolvedIp = IPAddress(0, 0, 0, 0);
+
+  String cmd = String("AT+CDNSGIP=\"") + host + "\"";
+  if (!sendSync(cmd, 5000))
+  {
+    return false;
+  }
+
+  uint32_t startMs = millis();
+  while (!dnsResolved && (millis() - startMs < 5000))
+  {
+    readUart();
+  }
+
+  if (dnsResolved)
+  {
+    out = dnsResolvedIp;
+    return true;
+  }
+  return false;
+}
+
 #endif // BOARD_WAVESHARE_SIM7670G
+
