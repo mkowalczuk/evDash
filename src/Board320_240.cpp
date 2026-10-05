@@ -4938,7 +4938,7 @@ bool Board320_240::ensureMqttConnected()
 
   mqttClient->setServer(liveData->settings.mqttServer, mqttPort);
   mqttClient->setSocketTimeout(5);
-  mqttClient->setBufferSize(512);
+  mqttClient->setBufferSize(768);
 
   // Last Will and Testament (LWT) topic and message
   char willTopic[96];
@@ -5043,7 +5043,7 @@ void Board320_240::publishHaSensor(const char *component, const char *objectId, 
   char configTopic[128];
   snprintf(configTopic, sizeof(configTopic), "homeassistant/%s/%s/%s/config", component, devId, objectId);
 
-  StaticJsonDocument<512> doc;
+  StaticJsonDocument<768> doc;
   doc["name"] = name;
   char uniqueId[96];
   snprintf(uniqueId, sizeof(uniqueId), "%s_%s", devId, objectId);
@@ -5108,11 +5108,12 @@ void Board320_240::publishHaSensor(const char *component, const char *objectId, 
   const char *swVer = (APP_VERSION[0] == 'v') ? (APP_VERSION + 1) : APP_VERSION;
   dev["sw"] = swVer;
 
-  char payload[512];
+  char payload[768];
   size_t len = serializeJson(doc, payload, sizeof(payload));
   if (len > 0 && len < sizeof(payload))
   {
     mqttClient->publish(configTopic, payload, true);
+    mqttClient->loop();
   }
 }
 
@@ -5618,7 +5619,7 @@ bool Board320_240::netSendData(bool sendAbrp)
           // Car telemetry (only when car CAN/BLE is communicating and socPerc >= 0)
           if (liveData->params.socPerc >= 0)
           {
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc", liveData->params.socPerc);
+            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc", liveData->params.socPerc, 2, true);
             published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charging_on", liveData->params.chargingOn ? 1 : 0);
             published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/ignition_on", liveData->params.ignitionOn ? 1 : 0);
             published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charger_ac_connected", liveData->params.chargerACconnected ? 1 : 0);
@@ -5651,11 +5652,11 @@ bool Board320_240::netSendData(bool sendAbrp)
                             (liveData->params.batteryTotalAvailableKWh * liveData->params.socPerc / 100.0f) : -1.0f);
             if (socKwh >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc_kwh", socKwh, 1);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc_kwh", socKwh, 1, true);
             }
             if (liveData->params.sohPerc >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soh", liveData->params.sohPerc, 1);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soh", liveData->params.sohPerc, 1, true);
             }
             if (liveData->params.batCellMinV > 0)
             {
@@ -5748,19 +5749,19 @@ bool Board320_240::netSendData(bool sendAbrp)
             // Tires
             if (liveData->params.tireFrontLeftPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fl", liveData->params.tireFrontLeftPressureBar);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fl", liveData->params.tireFrontLeftPressureBar, 2, true);
             }
             if (liveData->params.tireFrontRightPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fr", liveData->params.tireFrontRightPressureBar);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fr", liveData->params.tireFrontRightPressureBar, 2, true);
             }
             if (liveData->params.tireRearLeftPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rl", liveData->params.tireRearLeftPressureBar);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rl", liveData->params.tireRearLeftPressureBar, 2, true);
             }
             if (liveData->params.tireRearRightPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rr", liveData->params.tireRearRightPressureBar);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rr", liveData->params.tireRearRightPressureBar, 2, true);
             }
           }
 
