@@ -739,10 +739,16 @@ bool BoardInterface::customConsoleCommand(String cmd)
   }
   if (cmd.equalsIgnoreCase("ntpSync"))
   {
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      syslog->printf("WiFi not connected (status=%d). Connect first with 'wifiEnabled=1' or 'wifiConnect'.\n", WiFi.status());
+      return true;
+    }
+    liveData->params.ntpTimeSet = false;
     ntpSync();
     return true;
   }
-  if (cmd.equalsIgnoreCase("ipconfig"))
+  if (cmd.equalsIgnoreCase("ipconfig") || cmd.equalsIgnoreCase("wifiStatus") || cmd.equalsIgnoreCase("netStatus"))
   {
     showNet();
     return true;
@@ -2571,37 +2577,49 @@ bool BoardInterface::serializeParamsToJson(String &outJson, bool inclApiKey)
  */
 void BoardInterface::showNet()
 {
-  syslog->print("wifiSsid:  ");
-  syslog->println(liveData->settings.wifiSsid);
+  syslog->println(".-[ Network Status ]-_.");
+  syslog->printf("WiFi enabled: %s\n", (liveData->settings.wifiEnabled == 1) ? "YES" : "NO (run 'wifiEnabled=1' to turn on)");
 
-  if (liveData->settings.backupWifiEnabled == 1)
+  const char *statusStr = "UNKNOWN";
+  switch (WiFi.status())
   {
-    syslog->print("wifiSsid2: ");
-    syslog->println(liveData->settings.wifiSsid2);
+  case WL_IDLE_STATUS: statusStr = "IDLE (0)"; break;
+  case WL_NO_SSID_AVAIL: statusStr = "NO_SSID_AVAIL (1) - network not found"; break;
+  case WL_SCAN_COMPLETED: statusStr = "SCAN_COMPLETED (2)"; break;
+  case WL_CONNECTED: statusStr = "CONNECTED (3)"; break;
+  case WL_CONNECT_FAILED: statusStr = "CONNECT_FAILED (4) - check password"; break;
+  case WL_CONNECTION_LOST: statusStr = "CONNECTION_LOST (5)"; break;
+  case WL_DISCONNECTED: statusStr = "DISCONNECTED (6)"; break;
+  default: break;
   }
-  if (strlen(liveData->settings.wifiSsid3) > 0 && strcmp(liveData->settings.wifiSsid3, "empty") != 0)
-  {
-    syslog->print("wifiSsid3: ");
-    syslog->println(liveData->settings.wifiSsid3);
-  }
-  if (strlen(liveData->settings.wifiSsid4) > 0 && strcmp(liveData->settings.wifiSsid4, "empty") != 0)
-  {
-    syslog->print("wifiSsid4: ");
-    syslog->println(liveData->settings.wifiSsid4);
-  }
+  syslog->printf("WiFi status:  %s\n", statusStr);
+  syslog->printf("MAC Address:  %s\n", WiFi.macAddress().c_str());
 
-  String activeStr = "main";
-  if (liveData->params.wifiActiveIndex == 1)
-    activeStr = "2nd AP (SSID2)";
-  else if (liveData->params.wifiActiveIndex == 2)
-    activeStr = "3rd AP (SSID3)";
-  else if (liveData->params.wifiActiveIndex == 3)
-    activeStr = "4th AP (SSID4)";
-
-  syslog->print("Active: ");
-  syslog->println(activeStr);
-  syslog->print("IP-Address: ");
-  syslog->println(WiFi.localIP().toString());
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    syslog->printf("Connected AP: %s (RSSI: %d dBm, ch: %d)\n",
+                   WiFi.SSID().c_str(), WiFi.RSSI(), WiFi.channel());
+    syslog->printf("IP Address:   %s\n", WiFi.localIP().toString().c_str());
+    syslog->printf("Subnet Mask:  %s\n", WiFi.subnetMask().toString().c_str());
+    syslog->printf("Gateway:      %s\n", WiFi.gatewayIP().toString().c_str());
+    syslog->printf("Primary DNS:  %s\n", WiFi.dnsIP(0).toString().c_str());
+    if (WiFi.dnsIP(1) != IPAddress(0, 0, 0, 0))
+      syslog->printf("Backup DNS:   %s\n", WiFi.dnsIP(1).toString().c_str());
+  }
+  else
+  {
+    syslog->printf("Configured primary SSID: \"%s\"\n", liveData->settings.wifiSsid);
+    if (strlen(liveData->settings.wifiSsid) == 0)
+    {
+      syslog->println("Note: No SSID configured! Run 'wifiSsid=<name>' and 'wifiPassword=<pass>'.");
+    }
+    if (liveData->settings.backupWifiEnabled == 1)
+      syslog->printf("Configured backup SSID2: \"%s\"\n", liveData->settings.wifiSsid2);
+    if (strlen(liveData->settings.wifiSsid3) > 0 && strcmp(liveData->settings.wifiSsid3, "empty") != 0)
+      syslog->printf("Configured backup SSID3: \"%s\"\n", liveData->settings.wifiSsid3);
+    if (strlen(liveData->settings.wifiSsid4) > 0 && strcmp(liveData->settings.wifiSsid4, "empty") != 0)
+      syslog->printf("Configured backup SSID4: \"%s\"\n", liveData->settings.wifiSsid4);
+  }
 }
 
 /**

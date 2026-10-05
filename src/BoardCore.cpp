@@ -698,6 +698,35 @@ void BoardCore::seedSystemClock()
 }
 
 /**
+ * Sync NTP time
+ */
+void BoardCore::ntpSync()
+{
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    syslog->printf("[NTP] Cannot sync: WiFi not connected (status=%d). Ensure WiFi is connected first.\n", WiFi.status());
+    return;
+  }
+
+  syslog->printf("[NTP] Starting time sync via SNTP (tz=%d, dst=%d)...\n",
+                 liveData->settings.timezone,
+                 liveData->settings.daylightSaving);
+  const char *ntpServer1 = "pool.ntp.org";
+  const char *ntpServer2 = "time.cloudflare.com";
+  const char *ntpServer3 = "129.6.15.28"; // NIST, avoids DNS dependency
+  configTime(liveData->settings.timezone * 3600, liveData->settings.daylightSaving * 3600,
+             ntpServer1, ntpServer2, ntpServer3);
+}
+
+/**
+ * Synchronize hardware RTC from system clock (called after NTP sync)
+ */
+void BoardCore::syncRtcFromSystemTime()
+{
+  rtcWriteTime(time(nullptr));
+}
+
+/**
  * Update the IMU motion flag used to wake Sentry.
  * Motion = angular rate (gyro) OR linear acceleration off ~1 g (accelerometer),
  * so a smooth straight pull-away wakes the device too, not only a turn/bump.
@@ -1131,6 +1160,83 @@ void BoardCore::syncGPS()
   }
 }
 
+const char *BoardCore::getWifiDisconnectReasonStr(uint8_t reason)
+{
+  switch (reason)
+  {
+  case 1: return "UNSPECIFIED";
+  case 2: return "AUTH_EXPIRE";
+  case 3: return "AUTH_LEAVE";
+  case 4: return "ASSOC_EXPIRE";
+  case 5: return "ASSOC_TOOMANY";
+  case 6: return "NOT_AUTHED";
+  case 7: return "NOT_ASSOCED";
+  case 8: return "ASSOC_LEAVE";
+  case 9: return "ASSOC_NOT_AUTHED";
+  case 10: return "DISASSOC_PWRCAP_BAD";
+  case 11: return "DISASSOC_SUPCHAN_BAD";
+  case 12: return "BSS_TRANSITION_DISASSOC";
+  case 13: return "IE_INVALID";
+  case 14: return "MIC_FAILURE";
+  case 15: return "4WAY_HANDSHAKE_TIMEOUT (check password / signal)";
+  case 16: return "GROUP_KEY_UPDATE_TIMEOUT";
+  case 17: return "IE_IN_4WAY_DIFFERS";
+  case 18: return "GROUP_CIPHER_INVALID";
+  case 19: return "PAIRWISE_CIPHER_INVALID";
+  case 20: return "AKMP_INVALID";
+  case 21: return "UNSUPP_RSN_IE_VERSION";
+  case 22: return "INVALID_RSN_IE_CAP";
+  case 23: return "802_1X_AUTH_FAILED";
+  case 24: return "CIPHER_SUITE_REJECTED";
+  case 200: return "BEACON_TIMEOUT (out of range / lost AP)";
+  case 201: return "NO_AP_FOUND (SSID not found or out of range)";
+  case 202: return "AUTH_FAIL (incorrect password)";
+  case 203: return "ASSOC_FAIL";
+  case 204: return "HANDSHAKE_TIMEOUT (check password / signal)";
+  case 205: return "CONNECTION_FAIL";
+  default: return "UNKNOWN";
+  }
+}
+
+void BoardCore::registerWifiEvents()
+{
+  static bool s_wifiEventsRegistered = false;
+  if (s_wifiEventsRegistered)
+    return;
+  s_wifiEventsRegistered = true;
+
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    switch (event)
+    {
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+      syslog->printf("[WiFi] Connected to AP: \"%.*s\" (channel: %u)\n",
+                     info.wifi_sta_connected.ssid_len,
+                     reinterpret_cast<const char *>(info.wifi_sta_connected.ssid),
+                     info.wifi_sta_connected.channel);
+      break;
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      syslog->printf("[WiFi] Disconnected from \"%.*s\" (reason %u: %s)\n",
+                     info.wifi_sta_disconnected.ssid_len,
+                     reinterpret_cast<const char *>(info.wifi_sta_disconnected.ssid),
+                     info.wifi_sta_disconnected.reason,
+                     getWifiDisconnectReasonStr(info.wifi_sta_disconnected.reason));
+      break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      syslog->printf("[WiFi] IP acquired: %s (Mask: %s, Gateway: %s, DNS: %s)\n",
+                     IPAddress(info.got_ip.ip_info.ip.addr).toString().c_str(),
+                     IPAddress(info.got_ip.ip_info.netmask.addr).toString().c_str(),
+                     IPAddress(info.got_ip.ip_info.gw.addr).toString().c_str(),
+                     WiFi.dnsIP(0).toString().c_str());
+      break;
+    case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+      syslog->println("[WiFi] Lost IP address.");
+      break;
+    default:
+      break;
+    }
+  });
+}
+
 /**
  * Initializes and connects to WiFi using the stored SSID and password.
  *
@@ -1143,8 +1249,14 @@ bool BoardCore::wifiSetup()
   liveData->params.wifiActiveIndex = 0;
   liveData->params.isWifiBackupLive = false;
 
-  syslog->print("Initializing WiFi with SSID: ");
-  syslog->println(liveData->settings.wifiSsid);
+  registerWifiEvents();
+
+  if (strlen(liveData->settings.wifiSsid) == 0)
+  {
+    syslog->println("[WiFi] Warning: Primary WiFi SSID is empty. Set with 'wifiSsid=<name>'.");
+  }
+
+  syslog->printf("[WiFi] Starting connection to SSID: \"%s\"\n", liveData->settings.wifiSsid);
 
   // Enable Station mode and start connection.
   // NOTE: Do NOT call WiFi.setSleep(false) here — ESP-IDF requires modem sleep to be
@@ -2963,7 +3075,9 @@ void BoardCore::netLoop()
     else if (!gpsTimeFallbackAllowed && (millis() - ntpAttemptStartMs) >= kNtpPriorityWindowMs)
     {
       gpsTimeFallbackAllowed = true;
-      syslog->println("NTP sync timeout (60s), falling back to GPS time.");
+      syslog->printf("[NTP] Sync timeout (60s). WiFi status=%d, IP=%s. Falling back to GPS time.\n",
+                     WiFi.status(),
+                     WiFi.localIP().toString().c_str());
     }
   }
 
@@ -2981,7 +3095,7 @@ void BoardCore::netLoop()
   {
     s_ntpSyncCompleted = false;
     liveData->params.ntpTimeSet = true;
-    syslog->println("NTP time synchronized.");
+    syslog->println("[NTP] Time synchronized successfully.");
     showTime();
     syncRtcFromSystemTime();
   }

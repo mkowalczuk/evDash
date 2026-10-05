@@ -25,6 +25,4 @@ public:
   bool skipAdapterScan() override;
   static void eventDisplay(Event &e);
   void setTime(String timestamp) override;
-  void ntpSync() override;
-  void syncRtcFromSystemTime() override;
 };
