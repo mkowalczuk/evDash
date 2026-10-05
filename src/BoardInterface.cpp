@@ -306,7 +306,6 @@ void BoardInterface::loadSettings()
   liveData->settings.haName[0] = '\0';
   liveData->settings.haModel[0] = '\0';
   // v33
-  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
   liveData->settings.modemEnabled = 0;
   liveData->settings.modemApn[0] = '\0';
   liveData->settings.modemPin[0] = '\0';
@@ -315,6 +314,15 @@ void BoardInterface::loadSettings()
   liveData->settings.modemMqttEnabled = 1;
   liveData->settings.modemSocketTimeoutMs = 10000;
   liveData->settings.modemRetryBackoffSec = 5;
+  // v34
+  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
+  liveData->settings.modemApnUser[0] = '\0';
+  liveData->settings.modemApnPass[0] = '\0';
+  liveData->settings.modemApnAuth = 0;
+  liveData->settings.modemRoaming = 0;
+  liveData->settings.modemTransportPolicy = 0;
+  liveData->settings.modemTlsInsecure = 1;
+  liveData->settings.modemDataSaver = 0;
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -561,7 +569,7 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 32)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 33;
         liveData->tmpSettings.modemEnabled = 0;
         liveData->tmpSettings.modemApn[0] = '\0';
         liveData->tmpSettings.modemPin[0] = '\0';
@@ -570,6 +578,17 @@ void BoardInterface::loadSettings()
         liveData->tmpSettings.modemMqttEnabled = 1;
         liveData->tmpSettings.modemSocketTimeoutMs = 10000;
         liveData->tmpSettings.modemRetryBackoffSec = 5;
+      }
+      if (liveData->tmpSettings.settingsVersion == 33)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.modemApnUser[0] = '\0';
+        liveData->tmpSettings.modemApnPass[0] = '\0';
+        liveData->tmpSettings.modemApnAuth = 0;
+        liveData->tmpSettings.modemRoaming = 0;
+        liveData->tmpSettings.modemTransportPolicy = 0;
+        liveData->tmpSettings.modemTlsInsecure = 1;
+        liveData->tmpSettings.modemDataSaver = 0;
       }
 
       // Save upgraded structure
@@ -617,6 +636,8 @@ void BoardInterface::loadSettings()
   EVDASH_TERMINATE_FIELD(webLogServerPassword);
   EVDASH_TERMINATE_FIELD(modemApn);
   EVDASH_TERMINATE_FIELD(modemPin);
+  EVDASH_TERMINATE_FIELD(modemApnUser);
+  EVDASH_TERMINATE_FIELD(modemApnPass);
 #undef EVDASH_TERMINATE_FIELD
 
   if (!isValidPassword(liveData->settings.webLogServerPassword, 8))
@@ -2485,7 +2506,41 @@ bool BoardInterface::customConsoleCommand(String cmd)
       syslog->printf("modem SIM PIN set to: %s (run 'modem=reset' to apply)\n", (strlen(liveData->settings.modemPin) > 0) ? "****" : "(empty)");
       return true;
     }
-    syslog->println("Usage: modem[=info|reset|test|apn=<apn>|pin=<pin>]");
+    if (value.substring(0, 5).equalsIgnoreCase("user="))
+    {
+      String user = value.substring(5);
+      user.trim();
+      user.toCharArray(liveData->settings.modemApnUser, sizeof(liveData->settings.modemApnUser));
+      saveSettings();
+      syslog->printf("modem APN user set to: %s\n", liveData->settings.modemApnUser);
+      return true;
+    }
+    if (value.substring(0, 5).equalsIgnoreCase("pass="))
+    {
+      String pass = value.substring(5);
+      pass.trim();
+      pass.toCharArray(liveData->settings.modemApnPass, sizeof(liveData->settings.modemApnPass));
+      saveSettings();
+      syslog->printf("modem APN password set to: %s\n", (strlen(liveData->settings.modemApnPass) > 0) ? "******" : "(empty)");
+      return true;
+    }
+    if (value.substring(0, 5).equalsIgnoreCase("auth="))
+    {
+      int auth = value.substring(5).toInt();
+      if (auth >= 0 && auth <= 3)
+      {
+        liveData->settings.modemApnAuth = static_cast<uint8_t>(auth);
+        saveSettings();
+        const char *authStr = (auth == 1) ? "PAP (1)" : (auth == 2) ? "CHAP (2)" : (auth == 3) ? "PAP/CHAP (3)" : "None (0)";
+        syslog->printf("modem APN auth set to: %s\n", authStr);
+      }
+      else
+      {
+        syslog->println("Error: Use 0=None, 1=PAP, 2=CHAP, 3=PAP/CHAP");
+      }
+      return true;
+    }
+    syslog->println("Usage: modem[=info|reset|test|apn=<apn>|pin=<pin>|user=<user>|pass=<pass>|auth=<0..3>]");
     return true;
   }
 
@@ -2544,7 +2599,10 @@ bool BoardInterface::customConsoleCommand(String cmd)
   };
   if (flagSetting("modemEnabled", liveData->settings.modemEnabled) ||
       flagSetting("modemHttpEnabled", liveData->settings.modemHttpEnabled) ||
-      flagSetting("modemMqttEnabled", liveData->settings.modemMqttEnabled))
+      flagSetting("modemMqttEnabled", liveData->settings.modemMqttEnabled) ||
+      flagSetting("modemRoaming", liveData->settings.modemRoaming) ||
+      flagSetting("modemTlsInsecure", liveData->settings.modemTlsInsecure) ||
+      flagSetting("modemDataSaver", liveData->settings.modemDataSaver))
   {
     return true;
   }
@@ -2553,6 +2611,16 @@ bool BoardInterface::customConsoleCommand(String cmd)
     if (accepted)
     {
       liveData->settings.modemNetworkMode = static_cast<uint8_t>(newNumber);
+      saveSettings();
+    }
+    return true;
+  }
+  if (numberSetting("modemTransportPolicy", liveData->settings.modemTransportPolicy, 0, 3) ||
+      numberSetting("modemPolicy", liveData->settings.modemTransportPolicy, 0, 3))
+  {
+    if (accepted)
+    {
+      liveData->settings.modemTransportPolicy = static_cast<uint8_t>(newNumber);
       saveSettings();
     }
     return true;
@@ -2580,6 +2648,58 @@ bool BoardInterface::customConsoleCommand(String cmd)
     syslog->println("Use 'modem=apn=<apn>' and 'modem=pin=<pin>' to set these.");
     if (!isSetter && key.equalsIgnoreCase("modemApn"))
       syslog->printf("modemApn: %s\n", liveData->settings.modemApn);
+    return true;
+  }
+  if (key.equalsIgnoreCase("modemApnUser") || key.equalsIgnoreCase("modemUser"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.modemApnUser, sizeof(liveData->settings.modemApnUser));
+      saveSettings();
+      syslog->printf("modemApnUser set to: %s\n", liveData->settings.modemApnUser);
+    }
+    else
+    {
+      syslog->printf("modemApnUser: %s\n", liveData->settings.modemApnUser);
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("modemApnPass") || key.equalsIgnoreCase("modemPass"))
+  {
+    if (isSetter)
+    {
+      value.toCharArray(liveData->settings.modemApnPass, sizeof(liveData->settings.modemApnPass));
+      saveSettings();
+      syslog->printf("modemApnPass set to: %s\n", (strlen(liveData->settings.modemApnPass) > 0) ? "******" : "(empty)");
+    }
+    else
+    {
+      syslog->printf("modemApnPass: %s\n", (strlen(liveData->settings.modemApnPass) > 0) ? "******" : "(empty)");
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("modemApnAuth") || key.equalsIgnoreCase("modemAuth"))
+  {
+    if (isSetter)
+    {
+      int auth = value.toInt();
+      if (auth >= 0 && auth <= 3)
+      {
+        liveData->settings.modemApnAuth = static_cast<uint8_t>(auth);
+        saveSettings();
+        const char *authStr = (auth == 1) ? "PAP (1)" : (auth == 2) ? "CHAP (2)" : (auth == 3) ? "PAP/CHAP (3)" : "None (0)";
+        syslog->printf("modemApnAuth set to: %s\n", authStr);
+      }
+      else
+      {
+        syslog->println("Error: Use 0=None, 1=PAP, 2=CHAP, 3=PAP/CHAP");
+      }
+    }
+    else
+    {
+      const char *authStr = (liveData->settings.modemApnAuth == 1) ? "PAP (1)" : (liveData->settings.modemApnAuth == 2) ? "CHAP (2)" : (liveData->settings.modemApnAuth == 3) ? "PAP/CHAP (3)" : "None (0)";
+      syslog->printf("modemApnAuth: %s\n", authStr);
+    }
     return true;
   }
 
@@ -2933,10 +3053,14 @@ void BoardInterface::showHelp()
   syslog->println("  sdcardStatus          ... check SD card mount status");
   syslog->println("  gpsStatus             ... check GPS fix, satellites & coordinates (alias: gps)");
   syslog->println("  gpsInit               ... initialize / restart GPS module (alias: gnssStart)");
-  syslog->println("  modem[=info|reset|test|apn=<apn>|pin=<pin>] ... cellular modem status / control");
+  syslog->println("  modem[=info|reset|test|apn|pin|user|pass|auth] ... cellular modem status / control");
   syslog->println("  modemEnabled[=0|1]    ... get/set cellular data connection");
+  syslog->println("  modemRoaming[=0|1]    ... get/set cellular roaming allowance");
+  syslog->println("  modemPolicy[=0..3]    ... get/set transport policy (0=WiFi, 1=Cell, 2=Cell-only, 3=WiFi-only)");
+  syslog->println("  modemDataSaver[=0|1]  ... get/set reduced cellular data usage");
+  syslog->println("  modemTlsInsecure[=0|1]... get/set skip TLS cert check on modem sockets");
   syslog->println("  modemNetworkMode[=0|1|2] ... get/set network mode (0 auto, 1 LTE, 2 GSM)");
-  syslog->println("  modemHttpEnabled[=0|1], modemMqttEnabled[=0|1] ... allow HTTP / MQTT over the modem");
+  syslog->println("  modemHttpEnabled[=0|1], modemMqttEnabled[=0|1] ... allow HTTP / MQTT over modem");
   syslog->println("  modemSocketTimeoutMs[=ms], modemRetryBackoffSec[=sec] ... modem timing");
   syslog->println("  gpsModuleType[=0..3]  ... get/set GPS (0=none,1=M8N,2=GNSS,3=v2.1)");
   syslog->println("  gpsPort[=0|2|255]     ... get/set GPS hardware serial port");

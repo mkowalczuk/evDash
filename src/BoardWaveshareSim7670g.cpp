@@ -142,6 +142,27 @@ void BoardWaveshareSim7670g::modemInfo()
     syslog->println("Signal:        unknown");
   }
   syslog->printf("APN:           %s\n", liveData->settings.modemApn[0] != '\0' ? liveData->settings.modemApn : "(not set, use 'modem=apn=<apn>')");
+  if (strlen(liveData->settings.modemApnUser) > 0 || liveData->settings.modemApnAuth > 0)
+  {
+    const char *authStr = (liveData->settings.modemApnAuth == 1) ? "PAP" :
+                          (liveData->settings.modemApnAuth == 2) ? "CHAP" :
+                          (liveData->settings.modemApnAuth == 3) ? "PAP/CHAP" : "None";
+    syslog->printf("APN User/Auth: %s (auth: %s)\n",
+                   (strlen(liveData->settings.modemApnUser) > 0) ? liveData->settings.modemApnUser : "(none)",
+                   authStr);
+  }
+  syslog->printf("Roaming:       %s\n", (liveData->settings.modemRoaming == 1) ? "allowed" : "disabled (home only)");
+  const char *policyStr = "WiFi preferred";
+  switch (liveData->settings.modemTransportPolicy)
+  {
+  case 1: policyStr = "Cellular preferred"; break;
+  case 2: policyStr = "Cellular only"; break;
+  case 3: policyStr = "WiFi only"; break;
+  default: break;
+  }
+  syslog->printf("Policy:        %s\n", policyStr);
+  syslog->printf("Data saver:    %s\n", (liveData->settings.modemDataSaver == 1) ? "ON (reduced cellular usage)" : "OFF");
+  syslog->printf("TLS Insecure:  %s\n", (liveData->settings.modemTlsInsecure == 1) ? "YES (skip cert verification)" : "NO");
   syslog->printf("IP address:    %s\n", info.ipAddress.length() > 0 ? info.ipAddress.c_str() : "none");
   syslog->printf("AT commands:   %lu sent, %lu timed out\n",
                  static_cast<unsigned long>(modem.commandCount()), static_cast<unsigned long>(modem.timeoutCount()));
