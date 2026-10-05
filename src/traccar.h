@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+class WiFiClient;
+
 namespace Traccar
 {
   bool sendPosition(const char *serverHost,
@@ -15,5 +17,6 @@ namespace Traccar
                     float headingDeg,
                     float socPercent,
                     bool charging,
-                    int &outHttpCode);
+                    int &outHttpCode,
+                    WiFiClient *client = nullptr);
 }

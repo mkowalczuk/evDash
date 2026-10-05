@@ -4,6 +4,9 @@
 #include "LiveData.h"
 #include "CarInterface.h"
 #include "CommInterface.h"
+
+class NetTransport;
+
 class BoardInterface
 {
 
@@ -39,6 +42,7 @@ public:
   bool carCommandAllowed() { return carInterface->commandAllowed(); }
   void showTime();
   void showNet();
+  virtual NetTransport *activeTransport() { return nullptr; }
   virtual void showGps();
   virtual void initGPS() {}
   // Cellular modem console hooks. Boards without a modem inherit a message saying so.

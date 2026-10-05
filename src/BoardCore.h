@@ -1,9 +1,9 @@
 #pragma once
 
 #include "BoardInterface.h"
+#include "NetTransport.h"
+#include "WifiTransport.h"
 #include <TinyGPS++.h>
-#include <WiFiClient.h>
-#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include "SDL_Arduino_INA3221.h"
 
@@ -143,11 +143,11 @@ protected:
   uint32_t lastRemoteSendAtMs = 0;
   uint32_t lastAbrpSendAtMs = 0;
   uint32_t lastTraccarSendAtMs = 0;
-  WiFiClient *mqttPlainClient = nullptr;
-  WiFiClientSecure *mqttSecureClient = nullptr;
+  WifiTransport wifiTransport;
   PubSubClient *mqttClient = nullptr;
   uint32_t lastMqttReconnectAttemptMs = 0;
   static constexpr uint32_t kMqttReconnectBackoffMs = 15000;
+  NetTransport *activeTransport() override;
   bool ensureMqttConnected();
   void publishHomeAssistantDiscovery();
   void publishHaSensor(const char *component, const char *objectId, const char *name,

@@ -180,9 +180,11 @@ void BoardCore::mainLoop()
 
   pollEvdashPairingStatus();
 
+  const bool isWifiActive = (activeTransport() != nullptr && strcmp(activeTransport()->name(), "WiFi") == 0);
   const bool allowWifiFallback = (!liveData->params.stopCommandQueue &&
                                   !liveData->params.wifiApMode &&
                                   wifiEnabled &&
+                                  isWifiActive &&
                                   liveData->settings.remoteUploadModuleType == REMOTE_UPLOAD_WIFI);
   if (allowWifiFallback)
   {
@@ -984,6 +986,8 @@ void BoardCore::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t ho
 
   syncTimes(t);
   rtcWriteTime(t);
+  liveData->params.currentTime = t;
+  cachedNowEpoch = t;
 }
 
 /**
@@ -1039,6 +1043,22 @@ void BoardCore::syncGPS()
   if (gps.satellites.isValid())
   {
     liveData->params.gpsSat = gps.satellites.value();
+  }
+
+  // Synchronize time with GPS if it has not been synchronized yet.
+  // When NTP is enabled, allow immediate fallback if the system has no valid time yet (< 1700000000).
+  // Validate calendar components: many GPS modules stream uninitialized dummy dates (e.g. 2000-00-00) before lock.
+  if (!liveData->params.currTimeSyncWithGps &&
+      gps.date.isValid() && gps.time.isValid() &&
+      gps.date.year() >= 2024 && gps.date.year() <= 2099 &&
+      gps.date.month() >= 1 && gps.date.month() <= 12 &&
+      gps.date.day() >= 1 && gps.date.day() <= 31)
+  {
+    const bool noValidSystemTime = (liveData->params.currentTime < 1700000000);
+    if (liveData->settings.ntpEnabled == 0 || liveData->params.ntpTimeSet || gpsTimeFallbackAllowed || noValidSystemTime)
+    {
+      setGpsTime(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
+    }
   }
 
   const float prevLat = liveData->params.gpsLat;
@@ -1124,17 +1144,24 @@ void BoardCore::syncGPS()
         }
       }
     }
-  }
 
-  if (accepted)
-  {
-    liveData->params.gpsValid = true;
-    liveData->params.gpsLat = newLat;
-    liveData->params.gpsLon = newLon;
-    liveData->params.gpsAlt = gps.altitude.meters();
-    liveData->params.gpsLastFixTime = liveData->params.currentTime;
-    liveData->params.gpsLastFixMs = millis();
-    calcAutomaticBrightnessLatLon(); // Adjust screen brightness based on location
+    if (accepted)
+    {
+      liveData->params.gpsValid = true;
+      liveData->params.gpsLat = newLat;
+      liveData->params.gpsLon = newLon;
+      if (gps.altitude.isValid())
+      {
+        liveData->params.gpsAlt = gps.altitude.meters();
+      }
+      liveData->params.gpsLastFixTime = liveData->params.currentTime;
+      liveData->params.gpsLastFixMs = millis();
+      calcAutomaticBrightnessLatLon(); // Adjust screen brightness based on location
+    }
+    else
+    {
+      liveData->params.gpsValid = false;
+    }
   }
   else
   {
@@ -1190,21 +1217,6 @@ void BoardCore::syncGPS()
   else
   {
     liveData->params.gpsHeadingDeg = -1;
-  }
-
-  // Synchronize time with GPS if it has not been synchronized yet.
-  // When NTP is enabled, wait for the NTP priority window to expire before falling back to GPS time.
-  // Validate calendar components: many GPS modules stream uninitialized dummy dates (e.g. 2000-00-00) before lock.
-  if (!liveData->params.currTimeSyncWithGps &&
-      gps.date.isValid() && gps.time.isValid() &&
-      gps.date.year() >= 2024 && gps.date.year() <= 2099 &&
-      gps.date.month() >= 1 && gps.date.month() <= 12 &&
-      gps.date.day() >= 1 && gps.date.day() <= 31)
-  {
-    if (liveData->settings.ntpEnabled == 0 || liveData->params.ntpTimeSet || gpsTimeFallbackAllowed)
-    {
-      setGpsTime(gps.date.year(), gps.date.month(), gps.date.day(), gps.time.hour(), gps.time.minute(), gps.time.second());
-    }
   }
 }
 
@@ -1295,6 +1307,11 @@ void BoardCore::registerWifiEvents()
       break;
     }
   });
+}
+
+NetTransport *BoardCore::activeTransport()
+{
+  return &wifiTransport;
 }
 
 /**
@@ -1567,7 +1584,8 @@ bool BoardCore::requestPairingStart(String &outCode, uint32_t &outExpiresInSec)
   outCode = "";
   outExpiresInSec = 0;
 
-  if (WiFi.status() != WL_CONNECTED)
+  NetTransport *trans = activeTransport();
+  if (trans == nullptr || !trans->ready())
   {
     return false;
   }
@@ -1578,9 +1596,12 @@ bool BoardCore::requestPairingStart(String &outCode, uint32_t &outExpiresInSec)
     return false;
   }
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(kPairHttpTimeoutMs);
+  WiFiClient *client = trans->secureClient();
+  if (client == nullptr)
+  {
+    return false;
+  }
+  client->setTimeout(kPairHttpTimeoutMs);
 
   HTTPClient http;
   http.setReuse(false);
@@ -1591,7 +1612,7 @@ bool BoardCore::requestPairingStart(String &outCode, uint32_t &outExpiresInSec)
   url += (url.indexOf('?') == -1) ? "?" : "&";
   url += "id=" + pairDeviceId;
 
-  if (!http.begin(client, url))
+  if (!http.begin(*client, url))
   {
     syslog->println("Pair start: begin failed");
     return false;
@@ -1665,7 +1686,8 @@ uint8_t BoardCore::requestPairingStatus(const String &pairCode, String &outCarNa
 {
   outCarName = "";
 
-  if (WiFi.status() != WL_CONNECTED)
+  NetTransport *trans = activeTransport();
+  if (trans == nullptr || !trans->ready())
   {
     return 255;
   }
@@ -1680,9 +1702,12 @@ uint8_t BoardCore::requestPairingStatus(const String &pairCode, String &outCarNa
     return 255;
   }
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(kPairHttpTimeoutMs);
+  WiFiClient *client = trans->secureClient();
+  if (client == nullptr)
+  {
+    return 255;
+  }
+  client->setTimeout(kPairHttpTimeoutMs);
 
   HTTPClient http;
   http.setReuse(false);
@@ -1694,7 +1719,7 @@ uint8_t BoardCore::requestPairingStatus(const String &pairCode, String &outCarNa
   url += "id=" + pairDeviceId;
   url += "&code=" + pairCode;
 
-  if (!http.begin(client, url))
+  if (!http.begin(*client, url))
   {
     syslog->println("Pair status: begin failed");
     return 255;
@@ -1967,14 +1992,18 @@ void BoardCore::checkFirmwareVersionOnServer()
   }
   lastFirmwareVersionCheckMs = nowMs;
 
-  if (WiFi.status() != WL_CONNECTED)
+  NetTransport *trans = activeTransport();
+  if (trans == nullptr || !trans->ready())
   {
     return;
   }
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(kFirmwareVersionHttpTimeoutMs);
+  WiFiClient *client = trans->secureClient();
+  if (client == nullptr)
+  {
+    return;
+  }
+  client->setTimeout(kFirmwareVersionHttpTimeoutMs);
 
   HTTPClient http;
   http.setReuse(false);
@@ -2007,7 +2036,7 @@ void BoardCore::checkFirmwareVersionOnServer()
     firmwareCheckUrl += "v=" + appVersionForApi;
   }
 
-  if (!http.begin(client, firmwareCheckUrl))
+  if (!http.begin(*client, firmwareCheckUrl))
   {
     syslog->println("Firmware check: begin failed");
     return;
@@ -2186,13 +2215,13 @@ void BoardCore::disconnectMqtt(bool sendOfflineStatus)
       mqttClient->disconnect();
     }
   }
-  if (mqttSecureClient != nullptr)
+  NetTransport *trans = activeTransport();
+  if (trans != nullptr)
   {
-    mqttSecureClient->stop();
-  }
-  if (mqttPlainClient != nullptr)
-  {
-    mqttPlainClient->stop();
+    Client *plain = trans->mqttClient(false);
+    if (plain != nullptr) plain->stop();
+    Client *sec = trans->mqttClient(true);
+    if (sec != nullptr) sec->stop();
   }
 }
 
@@ -2202,7 +2231,8 @@ bool BoardCore::ensureMqttConnected()
   {
     return false;
   }
-  if (WiFi.status() != WL_CONNECTED)
+  NetTransport *trans = activeTransport();
+  if (trans == nullptr || !trans->ready())
   {
     return false;
   }
@@ -2212,26 +2242,12 @@ bool BoardCore::ensureMqttConnected()
   }
 
   // Choose transport
-  Client *transport = nullptr;
-  if (liveData->settings.mqttUseTls == 1)
+  Client *transport = trans->mqttClient(liveData->settings.mqttUseTls == 1);
+  if (transport == nullptr)
   {
-    if (mqttSecureClient == nullptr)
-    {
-      mqttSecureClient = new WiFiClientSecure();
-    }
-    mqttSecureClient->setInsecure();
-    mqttSecureClient->setTimeout(5000);
-    transport = mqttSecureClient;
+    return false;
   }
-  else
-  {
-    if (mqttPlainClient == nullptr)
-    {
-      mqttPlainClient = new WiFiClient();
-    }
-    mqttPlainClient->setTimeout(5000);
-    transport = mqttPlainClient;
-  }
+  transport->setTimeout(5000);
 
   if (mqttClient == nullptr)
   {
@@ -2526,7 +2542,8 @@ bool BoardCore::netSendData(bool sendAbrp)
 {
   int64_t startTime2 = esp_timer_get_time();
   int rc = 0;
-  const bool wifiReady = (liveData->settings.wifiEnabled == 1 && WiFi.status() == WL_CONNECTED);
+  NetTransport *trans = activeTransport();
+  const bool netReady = (trans != nullptr && trans->ready());
   const String contributeKey = ensureContributeKey();
   const String hardwareDeviceId = normalizeDeviceIdForApi(getHardwareDeviceId());
 
@@ -2539,23 +2556,16 @@ bool BoardCore::netSendData(bool sendAbrp)
     return false;
   }
 
-  // WIFI
-  if (liveData->settings.remoteUploadModuleType == 1)
+  if (trans != nullptr)
   {
-    syslog->info(DEBUG_NET, (liveData->settings.mqttEnabled == 1) ? "Sending data via MQTT - via WIFI" : "Sending data to API - via WIFI");
-  }
-  else
-  {
-    if (liveData->settings.remoteUploadModuleType != 0)
-    {
-      syslog->info(DEBUG_NET, "Unsupported module");
-    }
-    return false;
+    const char *dest = sendAbrp ? "ABRP" : ((liveData->settings.mqttEnabled == 1) ? "MQTT" : "API");
+    syslog->info(sendAbrp ? DEBUG_ABRP : DEBUG_NET,
+                 String("Sending data via ") + dest + " - via " + trans->name());
   }
 
-  if (!wifiReady)
+  if (!netReady)
   {
-    syslog->info(DEBUG_NET, "WiFi not connected, skipping data send");
+    syslog->info(DEBUG_NET, "Network transport not ready, skipping data send");
     return false;
   }
 
@@ -2642,9 +2652,9 @@ bool BoardCore::netSendData(bool sendAbrp)
       syslog->info(DEBUG_NET, liveData->settings.remoteApiUrl);
     }
 
-    // WIFI remote upload
+    // Remote upload (WiFi or Cellular active transport)
     rc = 0;
-    if (liveData->settings.remoteUploadModuleType == REMOTE_UPLOAD_WIFI && liveData->settings.wifiEnabled == 1)
+    if (trans != nullptr && trans->ready())
     {
       if (liveData->settings.mqttEnabled == 1)
       {
@@ -2654,7 +2664,7 @@ bool BoardCore::netSendData(bool sendAbrp)
           // Device & connection heartbeat (always sent when connected to MQTT broker)
           published &= publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
           published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/uptime", millis() / 1000);
-          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifi_rssi", WiFi.RSSI());
+          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifi_rssi", (trans != nullptr) ? trans->rssi() : 0);
           published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/car_connected", (liveData->params.socPerc >= 0) ? 1 : 0);
 
           // Car telemetry (only when car CAN/BLE is communicating and socPerc >= 0)
@@ -2833,15 +2843,22 @@ bool BoardCore::netSendData(bool sendAbrp)
       else
       {
         // Standard http post
-        WiFiClient wClient;
-        HTTPClient http;
+        WiFiClient *wClient = (trans != nullptr) ? trans->plainClient() : nullptr;
+        if (wClient == nullptr)
+        {
+          rc = -1;
+        }
+        else
+        {
+          HTTPClient http;
 
-        http.begin(wClient, liveData->settings.remoteApiUrl);
-        http.setConnectTimeout(2000);
-        http.addHeader("Content-Type", "application/json");
-        addWifiTransferredBytes(payloadLen);
-        rc = http.POST(payload);
-        http.end();
+          http.begin(*wClient, liveData->settings.remoteApiUrl);
+          http.setConnectTimeout(2000);
+          http.addHeader("Content-Type", "application/json");
+          addWifiTransferredBytes(payloadLen);
+          rc = http.POST(payload);
+          http.end();
+        }
       }
     }
 
@@ -2968,52 +2985,52 @@ bool BoardCore::netSendData(bool sendAbrp)
 
     // Code for sending https data to ABRP api server
     rc = 0;
-    if (liveData->settings.remoteUploadModuleType == REMOTE_UPLOAD_WIFI && liveData->settings.wifiEnabled == 1)
+    if (netReady)
     {
       // Track ABRP attempt time only when payload is valid and we're about to do the actual HTTP request.
       liveData->params.lastAbrpSent = liveData->params.currentTime;
       lastAbrpSendAtMs = millis();
 
-      WiFiClientSecure client;
-      HTTPClient http;
-
-      // Deliberately unvalidated: ABRP runs continuously during driving while BLE is
-      // active, and loading a CA chain raises the TLS handshake's internal-heap use —
-      // the exact pressure behind the contribute TLS-memory failures (issue #123) on
-      // Core2. The leak risk here is only the ABRP token (telemetry), not RCE; the
-      // RCE-relevant path (OTA) IS validated. Root CA is bundled in evdash_certs.h
-      // (AMAZON_ROOT_CA_1) for anyone who wants to opt in on a PSRAM-roomy build.
-      client.setInsecure();
-      http.begin(client, "https://api.iternio.com/1/tlm/send");
-      http.setConnectTimeout(kAbrpHttpsConnectTimeoutMs);
-      http.setTimeout(kAbrpHttpsIoTimeoutMs);
-      http.setReuse(false);
-      http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-      const size_t bodyLength = static_cast<size_t>(dtaLength);
-      addWifiTransferredBytes(bodyLength);
-      syslog->info(DEBUG_ABRP, "ABRP POST body length: " + String(bodyLength));
-      rc = http.POST((uint8_t *)gAbrpFormBuffer, bodyLength);
-      syslog->info(DEBUG_ABRP, "ABRP HTTP status: " + String(rc));
-
-      if (rc == HTTP_CODE_OK)
+      WiFiClient *client = (trans != nullptr) ? trans->secureClient() : nullptr;
+      if (client == nullptr)
       {
-        // Request successful
-        String payload = http.getString();
-        syslog->info(DEBUG_ABRP, "ABRP HTTP response body: " + payload);
+        rc = -1;
       }
       else
       {
-        // Handle different HTTP status codes
-        syslog->info(DEBUG_ABRP, "HTTP Request failed with code: " + String(rc));
-        if (rc > 0)
-        {
-          String payload = http.getString();
-          syslog->info(DEBUG_ABRP, "ABRP HTTP error body: " + payload);
-        }
-      }
+        HTTPClient http;
 
-      http.end();
-      client.stop();
+        http.begin(*client, "https://api.iternio.com/1/tlm/send");
+        http.setConnectTimeout(kAbrpHttpsConnectTimeoutMs);
+        http.setTimeout(kAbrpHttpsIoTimeoutMs);
+        http.setReuse(false);
+        http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+        const size_t bodyLength = static_cast<size_t>(dtaLength);
+        addWifiTransferredBytes(bodyLength);
+        syslog->info(DEBUG_ABRP, "ABRP POST body length: " + String(bodyLength));
+        rc = http.POST((uint8_t *)gAbrpFormBuffer, bodyLength);
+        syslog->info(DEBUG_ABRP, "ABRP HTTP status: " + String(rc));
+
+        if (rc == HTTP_CODE_OK)
+        {
+          // Request successful
+          String payload = http.getString();
+          syslog->info(DEBUG_ABRP, "ABRP HTTP response body: " + payload);
+        }
+        else
+        {
+          // Handle different HTTP status codes
+          syslog->info(DEBUG_ABRP, "HTTP Request failed with code: " + String(rc));
+          if (rc > 0)
+          {
+            String payload = http.getString();
+            syslog->info(DEBUG_ABRP, "ABRP HTTP error body: " + payload);
+          }
+        }
+
+        http.end();
+        client->stop();
+      }
     }
 
     if (rc == 200)
@@ -3054,8 +3071,9 @@ void BoardCore::netLoop()
     return;
   }
 
-  bool wifiReady = (liveData->settings.wifiEnabled == 1 && WiFi.status() == WL_CONNECTED);
-  if (!wifiReady)
+  NetTransport *trans = activeTransport();
+  const bool transportReady = (trans != nullptr && trans->ready());
+  if (!transportReady)
   {
     liveData->params.netAvailable = true;
     liveData->params.netLastFailureTime = 0;
@@ -3118,7 +3136,7 @@ void BoardCore::netLoop()
   const bool contributeConfigured = (liveData->settings.contributeData == 1);
   const bool internetTasksActive = remoteApiConfigured || abrpConfigured || traccarConfigured || contributeConfigured;
 
-  if (wifiReady && !internetTasksActive)
+  if (transportReady && !internetTasksActive)
   {
     liveData->params.netAvailable = true;
     liveData->params.netLastFailureTime = 0;
@@ -3126,7 +3144,7 @@ void BoardCore::netLoop()
     liveData->params.netFailureCount = 0;
     dismissedNetFailureTime = 0;
   }
-  else if (wifiReady && liveData->params.netAvailable == false &&
+  else if (transportReady && liveData->params.netAvailable == false &&
            liveData->params.netLastFailureTime != 0 &&
            liveData->params.currentTime >= liveData->params.netLastFailureTime &&
            (liveData->params.currentTime - liveData->params.netLastFailureTime) > kNetFailureStaleResetSec)
@@ -3143,7 +3161,7 @@ void BoardCore::netLoop()
                            liveData->params.netLastFailureTime != 0 &&
                            liveData->params.currentTime >= liveData->params.netLastFailureTime &&
                            (liveData->params.currentTime - liveData->params.netLastFailureTime) < kNetRetryIntervalSec);
-  bool netReady = wifiReady && !netBackoffActive;
+  bool netReady = transportReady && !netBackoffActive;
 
   if (!liveData->params.ntpTimeSet)
   {
@@ -3253,7 +3271,8 @@ void BoardCore::netLoop()
                                        liveData->params.gpsHeadingDeg,
                                        liveData->params.socPerc,
                                        liveData->params.chargingOn,
-                                       httpCode);
+                                       httpCode,
+                                       (trans != nullptr) ? trans->plainClient() : nullptr);
       }
 
       lastTraccarSendAtMs = millis();
@@ -3603,11 +3622,12 @@ bool BoardCore::postSdLogChunkToEvDash(const String &fileName, uint32_t part, co
   }
   const bool debugLog = (responseCode != nullptr && ((liveData->settings.debugLevel & DEBUG_SDCARD) != 0));
 
-  if (WiFi.status() != WL_CONNECTED)
+  NetTransport *trans = activeTransport();
+  if (trans == nullptr || !trans->ready())
   {
     if (debugLog)
     {
-      syslog->println("Log upload: WiFi not connected");
+      syslog->println("Log upload: transport not ready");
     }
     return false;
   }
@@ -3629,13 +3649,15 @@ bool BoardCore::postSdLogChunkToEvDash(const String &fileName, uint32_t part, co
 
   int rc = -1;
   String payload = "";
-  WiFiClientSecure client;
+  WiFiClient *client = trans->secureClient();
+  if (client == nullptr)
+  {
+    return false;
+  }
   HTTPClient http;
   const uint16_t connectTimeoutMs = (preferManualTimeouts ? kSdLogUploadManualConnectTimeoutMs : kSdLogUploadConnectTimeoutMs);
   const uint16_t ioTimeoutMs = (preferManualTimeouts ? kSdLogUploadManualIoTimeoutMs : kSdLogUploadIoTimeoutMs);
-  client.setInsecure();
-  client.setHandshakeTimeout((connectTimeoutMs + 999) / 1000);
-  client.setTimeout((ioTimeoutMs + 999) / 1000);
+  client->setTimeout(ioTimeoutMs);
 
   const String url = String(kSdLogUploadBaseUrl) + query;
   if (debugLog)
@@ -3643,9 +3665,9 @@ bool BoardCore::postSdLogChunkToEvDash(const String &fileName, uint32_t part, co
     syslog->print("Log upload try: ");
     syslog->println(url);
   }
-  if (!http.begin(client, url))
+  if (!http.begin(*client, url))
   {
-    client.stop();
+    client->stop();
     rc = -1;
     if (debugLog)
     {
@@ -3673,7 +3695,7 @@ bool BoardCore::postSdLogChunkToEvDash(const String &fileName, uint32_t part, co
       syslog->println(HTTPClient::errorToString(rc).c_str());
     }
     http.end();
-    client.stop();
+    client->stop();
   }
 
   if (responsePayload != nullptr)
@@ -3690,9 +3712,9 @@ bool BoardCore::postSdLogChunkToEvDash(const String &fileName, uint32_t part, co
     if (debugLog)
     {
       IPAddress resolved;
-      const int dnsRc = WiFi.hostByName("api.evdash.eu", resolved);
+      const bool dnsRc = trans->resolve("api.evdash.eu", resolved);
       syslog->print("Log upload DNS api.evdash.eu: ");
-      if (dnsRc == 1)
+      if (dnsRc)
       {
         syslog->println(resolved.toString());
       }
@@ -3700,21 +3722,7 @@ bool BoardCore::postSdLogChunkToEvDash(const String &fileName, uint32_t part, co
       {
         syslog->println("resolve_failed");
       }
-      syslog->print("WiFi status/IP/GW/DNS: ");
-      syslog->println(String(WiFi.status()) + " / " +
-                      WiFi.localIP().toString() + " / " +
-                      WiFi.gatewayIP().toString() + " / " +
-                      WiFi.dnsIP(0).toString());
-      if (dnsRc == 1)
-      {
-        WiFiClient tcpProbe;
-        const int tcpRc = tcpProbe.connect(resolved, 443, 2500);
-        syslog->print("Log upload TCP probe ");
-        syslog->print(resolved.toString());
-        syslog->print(":443 rc=");
-        syslog->println(tcpRc);
-        tcpProbe.stop();
-      }
+      syslog->printf("Transport (%s) status/IP: %s\n", trans->name(), trans->ipAddress().c_str());
     }
     return false;
   }

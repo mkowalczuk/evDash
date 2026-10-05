@@ -641,8 +641,9 @@ bool Board320_240::drawActiveScreenToSprite()
       statusBoxUsed = true;
     }
 
-  if (!statusBoxUsed && liveData->settings.wifiEnabled == 1 &&
-      WiFi.status() == WL_CONNECTED && netStatusMessageVisible())
+  NetTransport *trans = activeTransport();
+  const bool transportReady = (trans != nullptr && trans->ready());
+  if (!statusBoxUsed && transportReady && netStatusMessageVisible())
   {
     spr.fillRoundRect(0, 185, 320, 50, statusBoxRadius, TFT_BLACK);
     spr.drawRoundRect(0, 185, 320, 50, statusBoxRadius, TFT_WHITE);
@@ -650,7 +651,7 @@ bool Board320_240::drawActiveScreenToSprite()
     spr.setTextDatum(TL_DATUM);
     spr.setTextColor(TFT_WHITE);
     sprSetFont(fontFont2);
-    sprDrawString("WiFi OK", 10, 190);
+    sprDrawString((String(trans->name()) + " OK").c_str(), 10, 190);
     sprDrawString("Net temporarily unavailable", 10, 210);
     statusBoxUsed = true;
   }
