@@ -753,6 +753,17 @@ bool BoardInterface::customConsoleCommand(String cmd)
     showNet();
     return true;
   }
+  if (cmd.equalsIgnoreCase("gpsStatus") || cmd.equalsIgnoreCase("gnssStatus") || cmd.equalsIgnoreCase("gps") || cmd.equalsIgnoreCase("gnss"))
+  {
+    showGps();
+    return true;
+  }
+  if (cmd.equalsIgnoreCase("gpsInit") || cmd.equalsIgnoreCase("gnssStart"))
+  {
+    syslog->println("Initializing GPS / GNSS module...");
+    initGPS();
+    return true;
+  }
   if (cmd.equalsIgnoreCase("ABRP_debug"))
   {
     syslog->println(liveData->settings.abrpApiToken);
@@ -2623,6 +2634,46 @@ void BoardInterface::showNet()
 }
 
 /**
+ * Show GPS / GNSS Status
+ */
+void BoardInterface::showGps()
+{
+  syslog->println(".-[ GPS / GNSS Status ]-_.");
+  syslog->printf("GPS Valid Fix:    %s\n", liveData->params.gpsValid ? "YES" : "NO");
+  syslog->printf("Satellites:       %u\n", liveData->params.gpsSat);
+  if (liveData->params.gpsValid && liveData->params.gpsLat != -1.0f)
+  {
+    syslog->printf("Latitude:         %.6f\n", liveData->params.gpsLat);
+    syslog->printf("Longitude:        %.6f\n", liveData->params.gpsLon);
+    syslog->printf("Altitude:         %.1f m\n", liveData->params.gpsAlt);
+    syslog->printf("Speed (GPS):      %.1f km/h\n", liveData->params.speedKmhGPS);
+    syslog->printf("Heading:          %.1f deg\n", liveData->params.gpsHeadingDeg);
+  }
+  else
+  {
+    syslog->println("Location:         No fix yet (check antenna & sky visibility)");
+  }
+  struct tm now;
+  const bool hasSystemTime = getLocalTime(&now, 0);
+  if (liveData->params.currTimeSyncWithGps)
+  {
+    syslog->println("Time Synced:      YES (from GPS)");
+  }
+  else if (liveData->params.ntpTimeSet)
+  {
+    syslog->println("Time Synced:      YES (from NTP)");
+  }
+  else if (hasSystemTime)
+  {
+    syslog->println("Time Synced:      YES (RTC / manual)");
+  }
+  else
+  {
+    syslog->println("Time Synced:      NO");
+  }
+}
+
+/**
  * Show time
  */
 void BoardInterface::showTime()
@@ -2705,6 +2756,8 @@ void BoardInterface::showHelp()
   syslog->println("  sdcardConsoleLog[=0|1]... get/set console log to SD");
   syslog->println("  sdcardAutstartLog[=0|1] ... get/set SD autostart log");
   syslog->println("  sdcardStatus          ... check SD card mount status");
+  syslog->println("  gpsStatus             ... check GPS fix, satellites & coordinates (alias: gps)");
+  syslog->println("  gpsInit               ... initialize / restart GPS module (alias: gnssStart)");
   syslog->println("  gpsModuleType[=0..3]  ... get/set GPS (0=none,1=M8N,2=GNSS,3=v2.1)");
   syslog->println("  gpsPort[=0|2|255]     ... get/set GPS hardware serial port");
   syslog->println("  gpsSpeed[=baud]       ... get/set GPS baud rate");

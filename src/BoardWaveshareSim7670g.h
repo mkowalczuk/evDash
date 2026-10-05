@@ -41,6 +41,8 @@ public:
   void commLoop() override;
   void boardLoop() override;
   void afterSetup() override;
+  void initGPS() override;
+  void showGps() override;
 
 private:
   // Opens the AT UART to the modem and waits briefly for it to answer, so that

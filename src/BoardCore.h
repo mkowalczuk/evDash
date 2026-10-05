@@ -89,6 +89,8 @@ public:
   virtual void enterSleepMode(int secs) { (void)secs; }
   void ntpSync() override;
   void syncRtcFromSystemTime() override;
+  void showGps() override;
+  void initGPS() override;
   bool netSendData(bool sendAbrp) override;
   void disconnectMqtt(bool sendOfflineStatus = false) override;
   virtual void sdcardToggleRecording() {}
@@ -258,7 +260,6 @@ protected:
   void setGpsV21Pps(bool enabled);
   void updateGpsV21PpsMode();
   void updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ, float accX, float accY, float accZ);
-  void initGPS();
   void syncGPS();
   void syncTimes(time_t newTime);
   virtual void setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds);
