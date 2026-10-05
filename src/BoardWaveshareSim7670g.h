@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BoardCore.h"
+#include "Sim7670G.h"
 #include <SD_MMC.h>
 #include <SPI.h>
 #include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
@@ -43,19 +44,20 @@ public:
   void afterSetup() override;
   void initGPS() override;
   void showGps() override;
+  void modemInfo() override;
+  void modemReset() override;
+  void modemTest() override;
 
 private:
-  // Opens the AT UART to the modem and waits briefly for it to answer, so that
-  // a misconfigured or unpowered modem is visible at boot instead of failing
-  // silently later during an upload. Returns false if the modem never replies.
-  bool modemBegin();
-  bool modemSendCommand(const char *command, uint32_t timeoutMs);
+  // Opens the AT UART and hands it to the modem driver. The driver probes the
+  // modem from the main loop, so boot does not wait for it to answer.
+  void modemBegin();
 
-  // The AT link is deliberately not gpsHwUart. On this board GNSS does not
-  // arrive as NMEA on its own line - it comes back over this same UART as AT
-  // responses - so the two roles are about to merge, but until that is
-  // implemented they are separate objects.
+  // The AT UART carries GNSS NMEA as well as command replies, so the driver
+  // owns it and forwards the NMEA lines to the GPS parser. It is deliberately
+  // not gpsHwUart.
   HardwareSerial *modemUart = nullptr;
-  bool modemReady = false;
+  Sim7670G modem;
+  bool gpsFed = false;
   SFE_MAX1704X max17048;
 };

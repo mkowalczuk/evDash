@@ -41,6 +41,10 @@ public:
   void showNet();
   virtual void showGps();
   virtual void initGPS() {}
+  // Cellular modem console hooks. Boards without a modem inherit a message saying so.
+  virtual void modemInfo();
+  virtual void modemReset();
+  virtual void modemTest();
   void showHelp();
   void processSerialConsole();
   virtual void setTime(String timestamp);
