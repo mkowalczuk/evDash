@@ -325,7 +325,15 @@ bool Sim7670G::apnConfigured() const
 
 bool Sim7670G::registered() const
 {
-  return modemInfo.registration == 1 || modemInfo.registration == 5;
+  if (modemInfo.registration == 1)
+  {
+    return true;
+  }
+  if (liveData != nullptr && liveData->settings.modemRoaming == 1 && modemInfo.registration == 5)
+  {
+    return true;
+  }
+  return false;
 }
 
 uint32_t Sim7670G::pollIntervalMs() const
@@ -391,7 +399,7 @@ void Sim7670G::tick()
 
 void Sim7670G::stepInit()
 {
-  if (initStep >= 6)
+  if (initStep >= 7)
   {
     setState(STATE_READY);
     if (readyCallback)
@@ -513,6 +521,43 @@ void Sim7670G::stepInit()
     {
       stepBusy = false;
       initStep = 6;
+    }
+    break;
+  case 6:
+    if (apnConfigured() && (liveData->settings.modemApnAuth > 0 || liveData->settings.modemApnUser[0] != '\0'))
+    {
+      uint8_t auth = liveData->settings.modemApnAuth;
+      if (auth == 0)
+      {
+        auth = 1; // Default to PAP if credentials given without explicit auth type
+      }
+      // SIM7670G's AT+CGAUTH only accepts auth_type 0 (none), 1 (PAP) or 2 (CHAP).
+      // The UI no longer offers anything else, but guard against a stale value from
+      // older firmware/EEPROM (e.g. the previously-offered "PAP or CHAP"=3) which
+      // the modem rejects with "+CME ERROR: Incorrect parameters". Fall back to PAP.
+      if (auth > 2)
+      {
+        auth = 1;
+      }
+      String cmd = String("AT+CGAUTH=1,") + auth;
+      if (liveData->settings.modemApnPass[0] != '\0' || liveData->settings.modemApnUser[0] != '\0')
+      {
+        cmd += ",\"";
+        cmd += liveData->settings.modemApnPass;
+        cmd += "\",\"";
+        cmd += liveData->settings.modemApnUser;
+        cmd += "\"";
+      }
+      send(cmd, 3000, [this](bool, const String &)
+           {
+             stepBusy = false;
+             initStep = 7;
+           });
+    }
+    else
+    {
+      stepBusy = false;
+      initStep = 7;
     }
     break;
   }
