@@ -682,26 +682,5 @@ void BoardM5stackCoreS3::setTime(String timestamp)
   BoardInterface::setTime(timestamp);
 }
 
-/**
- * Sync NTP time
- */
-void BoardM5stackCoreS3::ntpSync()
-{
-  syslog->println("Syncing NTP time.");
-
-  const char *ntpServer1 = "pool.ntp.org";
-  const char *ntpServer2 = "time.cloudflare.com";
-  const char *ntpServer3 = "129.6.15.28"; // NIST, avoids DNS dependency
-  configTime(liveData->settings.timezone * 3600, liveData->settings.daylightSaving * 3600,
-             ntpServer1, ntpServer2, ntpServer3);
-}
-
-void BoardM5stackCoreS3::syncRtcFromSystemTime()
-{
-  // Persist through the BoardCore RTC seam rather than touching CoreS3.Rtc
-  // directly, so a board whose clock is stored differently still gets written.
-  rtcWriteTime(time(nullptr));
-}
-
 #endif // BOARD_M5STACK_CORES3
 #endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3

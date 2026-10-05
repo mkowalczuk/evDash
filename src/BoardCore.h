@@ -87,7 +87,8 @@ public:
   virtual void boardLoop() {}
   virtual void mainLoop();
   virtual void enterSleepMode(int secs) { (void)secs; }
-  virtual void ntpSync() {}
+  void ntpSync() override;
+  void syncRtcFromSystemTime() override;
   bool netSendData(bool sendAbrp) override;
   void disconnectMqtt(bool sendOfflineStatus = false) override;
   virtual void sdcardToggleRecording() {}
@@ -269,6 +270,8 @@ protected:
   void wifiSwitchToMain();
   void wifiSwitchToBackup();
   void wifiSwitchToIndex(uint8_t index);
+  void registerWifiEvents();
+  static const char *getWifiDisconnectReasonStr(uint8_t reason);
   void uploadSdCardLogToEvDashServer(bool silent = false);
   void queueAbrpSdLog(const char *payload, size_t length, time_t currentTime, uint64_t operationTimeSec, bool timeSyncWithGps);
 protected:

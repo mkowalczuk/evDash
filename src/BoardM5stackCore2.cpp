@@ -719,37 +719,5 @@ void BoardM5stackCore2::setTime(String timestamp)
   BoardInterface::setTime(timestamp);
 }
 
-/**
- * Sync NTP time
- */
-void BoardM5stackCore2::ntpSync()
-{
-  syslog->println("Syncing NTP time.");
-
-  const char *ntpServer1 = "pool.ntp.org";
-  const char *ntpServer2 = "time.cloudflare.com";
-  const char *ntpServer3 = "129.6.15.28"; // NIST, avoids DNS dependency
-  configTime(liveData->settings.timezone * 3600, liveData->settings.daylightSaving * 3600,
-             ntpServer1, ntpServer2, ntpServer3);
-}
-
-void BoardM5stackCore2::syncRtcFromSystemTime()
-{
-  struct tm now;
-  if (getLocalTime(&now, 0))
-  {
-    RTC_TimeTypeDef RTCtime;
-    RTC_DateTypeDef RTCdate;
-    RTCdate.Year = now.tm_year + 1900;
-    RTCdate.Month = now.tm_mon + 1;
-    RTCdate.Date = now.tm_mday;
-    RTCtime.Hours = now.tm_hour;
-    RTCtime.Minutes = now.tm_min;
-    RTCtime.Seconds = now.tm_sec;
-    M5.Rtc.SetTime(&RTCtime);
-    M5.Rtc.SetDate(&RTCdate);
-  }
-}
-
 #endif // BOARD_M5STACK_CORE2
 #endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3
