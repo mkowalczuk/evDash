@@ -11,7 +11,9 @@ static constexpr int kModemTxPin = SIM7670G_TX_PIN;
 static constexpr int kModemBaud = 115200;
 static constexpr uint8_t kModemUartNum = 1;
 
-static constexpr uint32_t kModemProbeTimeoutMs = 4000;
+// NMEA bursts and command replies share the UART, and the main loop can be busy
+// for a while between reads, so the default 256-byte receive buffer is too small.
+static constexpr size_t kModemRxBufferSize = 2048;
 
 void BoardWaveshareSim7670g::initBoard()
 {
@@ -67,41 +69,32 @@ void BoardWaveshareSim7670g::boardLoop()
     return;
   }
 
-  const bool allowGps = !(liveData->params.stopCommandQueue && liveData->settings.voltmeterEnabled == 1);
-  if (!allowGps)
-  {
-    return;
-  }
+  // The driver always runs, because the modem has to be brought up whether or
+  // not GNSS is being consumed right now. It forwards NMEA through the sink.
+  modem.loop();
 
-  if (modemUart->available())
+  const bool allowGps = !(liveData->params.stopCommandQueue && liveData->settings.voltmeterEnabled == 1);
+  if (gpsFed && allowGps)
   {
-    do
-    {
-      int ch = modemUart->read();
-      if (ch != -1)
-      {
-        syslog->infoNolf(DEBUG_GPS, char(ch));
-        gps.encode(ch);
-      }
-    } while (modemUart->available());
+    gpsFed = false;
     syncGPS();
   }
 }
 
 void BoardWaveshareSim7670g::initGPS()
 {
-  if (!modemReady && modemUart == nullptr)
+  if (modemUart == nullptr)
   {
     modemBegin();
     return;
   }
 
+  // Queued rather than awaited. If the modem is not up yet these time out, and
+  // the driver's ready callback runs this again once it answers.
   syslog->println("SIM7670G: enabling GNSS...");
-  modemSendCommand("AT+CGNSSPWR=1", 1000);
-  delay(50);
-  modemSendCommand("AT+CGNSSTST=1", 1000);
-  delay(50);
-  modemSendCommand("AT+CGNSSPORTSWITCH=0,1", 1000);
+  modem.send("AT+CGNSSPWR=1", 1000);
+  modem.send("AT+CGNSSTST=1", 1000);
+  modem.send("AT+CGNSSPORTSWITCH=0,1", 1000);
 }
 
 void BoardWaveshareSim7670g::showGps()
@@ -109,81 +102,86 @@ void BoardWaveshareSim7670g::showGps()
   BoardCore::showGps();
   syslog->printf("Modem Hardware:   SIM7670G on UART%u (GPIO%d RX, GPIO%d TX, %d baud)\n",
                  kModemUartNum, kModemRxPin, kModemTxPin, kModemBaud);
-  syslog->printf("Modem Responding: %s\n", modemReady ? "YES" : "NO");
+  syslog->printf("Modem Responding: %s\n", modem.responding() ? "YES" : "NO");
 }
 
-/**
- * Send one AT command and wait for the modem to answer.
- *
- * The reply is only checked for the "OK" terminator. Reading the response body
- * properly needs the AT parser, which arrives with the cellular work; until then
- * this is enough to tell an attached, powered modem from an unpowered carrier
- * or a wrong pin assignment.
- */
-bool BoardWaveshareSim7670g::modemSendCommand(const char *command, uint32_t timeoutMs)
+static const char *registrationText(int stat)
 {
-  modemUart->print(command);
-  modemUart->print("\r\n");
-
-  String reply;
-  const uint32_t startMs = millis();
-  while (millis() - startMs < timeoutMs)
+  switch (stat)
   {
-    while (modemUart->available())
-    {
-      const char ch = (char)modemUart->read();
-      if (ch == '\r' || ch == '\n')
-      {
-        if (reply.endsWith("OK") || reply.indexOf("OK") >= 0)
-        {
-          return true;
-        }
-        if (reply.indexOf("ERROR") >= 0 || reply.indexOf("FAIL") >= 0)
-        {
-          return false;
-        }
-        if (reply.length() > 0)
-        {
-          reply.clear();
-        }
-        continue;
-      }
-      reply += ch;
-      if (reply.length() > 256)
-      {
-        reply.remove(0, reply.length() - 256);
-      }
-    }
-    delay(10);
+  case 0: return "not registered, not searching";
+  case 1: return "registered, home network";
+  case 2: return "searching for a network";
+  case 3: return "registration denied";
+  case 4: return "unknown";
+  case 5: return "registered, roaming";
+  default: return "not queried yet";
   }
-  return reply.indexOf("OK") >= 0;
 }
 
-
-bool BoardWaveshareSim7670g::modemBegin()
+void BoardWaveshareSim7670g::modemInfo()
 {
-  modemUart = new HardwareSerial(kModemUartNum);
-  modemUart->begin(kModemBaud, SERIAL_8N1, kModemRxPin, kModemTxPin);
-  delay(300);
-  while (modemUart->available())
+  const Sim7670G::Info &info = modem.info();
+  syslog->println(".-[ Cellular Modem ]-_.");
+  syslog->printf("Hardware:      SIM7670G on UART%u (GPIO%d RX, GPIO%d TX, %d baud)\n",
+                 kModemUartNum, kModemRxPin, kModemTxPin, kModemBaud);
+  syslog->printf("Responding:    %s\n", modem.responding() ? "YES" : "NO (check power DIP switch and antenna)");
+  syslog->printf("State:         %s\n", modem.stateName());
+  syslog->printf("Data enabled:  %s\n", (liveData->settings.modemEnabled == 1) ? "YES" : "NO (run 'modemEnabled=1')");
+  syslog->printf("IMEI:          %s\n", info.imei.length() > 0 ? info.imei.c_str() : "unknown");
+  syslog->printf("Firmware:      %s\n", info.firmware.length() > 0 ? info.firmware.c_str() : "unknown");
+  syslog->printf("SIM:           %s\n", info.simReady ? "ready" : "not ready");
+  syslog->printf("Registration:  %s\n", registrationText(info.registration));
+  syslog->printf("Operator:      %s\n", info.operatorName.length() > 0 ? info.operatorName.c_str() : "unknown");
+  if (info.rssiDbm != 0)
   {
-    modemUart->read();
-  }
-
-  // A bare "AT" is the cheapest way to see whether the modem is alive.
-  modemReady = modemSendCommand("AT", kModemProbeTimeoutMs);
-
-  if (modemReady)
-  {
-    syslog->println("SIM7670G: AT UART responding");
-    initGPS();
+    syslog->printf("Signal:        %d dBm\n", info.rssiDbm);
   }
   else
   {
-    syslog->println("SIM7670G: no response on the AT UART (GPIO17/18, 115200)");
+    syslog->println("Signal:        unknown");
   }
-  return modemReady;
+  syslog->printf("APN:           %s\n", liveData->settings.modemApn[0] != '\0' ? liveData->settings.modemApn : "(not set, use 'modem=apn=<apn>')");
+  syslog->printf("IP address:    %s\n", info.ipAddress.length() > 0 ? info.ipAddress.c_str() : "none");
+  syslog->printf("AT commands:   %lu sent, %lu timed out\n",
+                 static_cast<unsigned long>(modem.commandCount()), static_cast<unsigned long>(modem.timeoutCount()));
 }
+
+void BoardWaveshareSim7670g::modemReset()
+{
+  syslog->println("Restarting the modem state machine...");
+  modem.reset();
+}
+
+void BoardWaveshareSim7670g::modemTest()
+{
+  syslog->println("Sending AT to the modem...");
+  modem.send("AT", 2000, [](bool ok, const String &response)
+             {
+               syslog->printf("modem test: %s%s%s\n", ok ? "OK" : "FAILED", response.length() > 0 ? " - " : "", response.c_str());
+             });
+}
+
+void BoardWaveshareSim7670g::modemBegin()
+{
+  modemUart = new HardwareSerial(kModemUartNum);
+  modemUart->setRxBufferSize(kModemRxBufferSize);
+  modemUart->begin(kModemBaud, SERIAL_8N1, kModemRxPin, kModemTxPin);
+
+  modem.setNmeaSink([this](char ch)
+                    {
+                      syslog->infoNolf(DEBUG_GPS, ch);
+                      gps.encode(ch);
+                      gpsFed = true;
+                    });
+  modem.setReadyCallback([this]()
+                         {
+                           syslog->println("SIM7670G: AT UART responding");
+                           initGPS();
+                         });
+  modem.begin(modemUart, liveData);
+}
+
 bool BoardWaveshareSim7670g::sdBegin()
 {
   // SDMMC on ESP32-S3: CLK 5, CMD 4, DATA 6 (1-bit mode by default)

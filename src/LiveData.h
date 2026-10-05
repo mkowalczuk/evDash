@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 32
+#define SETTINGS_VERSION_CURRENT 33
 
 // BLE MAC address connection types
 #define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
@@ -474,6 +474,15 @@ typedef struct
   // == settings version 32
   char haName[32];                 // HA device name (fallback to mqttId)
   char haModel[32];                // HA device model name (fallback to mqttPubTopic)
+  // == settings version 33
+  uint8_t modemEnabled;            // 0 - modem used for GNSS only, 1 - also bring up the cellular data connection
+  char modemApn[64];               // Cellular access point name
+  char modemPin[8];                // SIM PIN, empty if the SIM is not locked
+  uint8_t modemNetworkMode;        // 0 - automatic, 1 - LTE only, 2 - GSM only
+  uint8_t modemHttpEnabled;        // 1 - allow HTTP(S) uploads over the modem
+  uint8_t modemMqttEnabled;        // 1 - allow MQTT over the modem
+  uint16_t modemSocketTimeoutMs;   // Network socket timeout
+  uint16_t modemRetryBackoffSec;   // Delay before retrying a failed modem step
   //
 } SETTINGS_STRUC;
 

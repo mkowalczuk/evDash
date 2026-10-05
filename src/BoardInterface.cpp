@@ -303,9 +303,18 @@ void BoardInterface::loadSettings()
   // v31
   liveData->settings.mqttHomeAssistant = 0;
   // v32
-  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
   liveData->settings.haName[0] = '\0';
   liveData->settings.haModel[0] = '\0';
+  // v33
+  liveData->settings.settingsVersion = SETTINGS_VERSION_CURRENT;
+  liveData->settings.modemEnabled = 0;
+  liveData->settings.modemApn[0] = '\0';
+  liveData->settings.modemPin[0] = '\0';
+  liveData->settings.modemNetworkMode = 0;
+  liveData->settings.modemHttpEnabled = 1;
+  liveData->settings.modemMqttEnabled = 1;
+  liveData->settings.modemSocketTimeoutMs = 10000;
+  liveData->settings.modemRetryBackoffSec = 5;
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -546,9 +555,21 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 31)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 32;
         liveData->tmpSettings.haName[0] = '\0';
         liveData->tmpSettings.haModel[0] = '\0';
+      }
+      if (liveData->tmpSettings.settingsVersion == 32)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.modemEnabled = 0;
+        liveData->tmpSettings.modemApn[0] = '\0';
+        liveData->tmpSettings.modemPin[0] = '\0';
+        liveData->tmpSettings.modemNetworkMode = 0;
+        liveData->tmpSettings.modemHttpEnabled = 1;
+        liveData->tmpSettings.modemMqttEnabled = 1;
+        liveData->tmpSettings.modemSocketTimeoutMs = 10000;
+        liveData->tmpSettings.modemRetryBackoffSec = 5;
       }
 
       // Save upgraded structure
@@ -594,6 +615,8 @@ void BoardInterface::loadSettings()
   EVDASH_TERMINATE_FIELD(relayToken);
   EVDASH_TERMINATE_FIELD(relayMobileId);
   EVDASH_TERMINATE_FIELD(webLogServerPassword);
+  EVDASH_TERMINATE_FIELD(modemApn);
+  EVDASH_TERMINATE_FIELD(modemPin);
 #undef EVDASH_TERMINATE_FIELD
 
   if (!isValidPassword(liveData->settings.webLogServerPassword, 8))
@@ -2426,6 +2449,140 @@ bool BoardInterface::customConsoleCommand(String cmd)
     return true;
   }
 
+  // Cellular modem
+  if (key.equalsIgnoreCase("modem"))
+  {
+    if (!isSetter || value.length() == 0 || value.equalsIgnoreCase("info"))
+    {
+      modemInfo();
+      return true;
+    }
+    if (value.equalsIgnoreCase("reset"))
+    {
+      modemReset();
+      return true;
+    }
+    if (value.equalsIgnoreCase("test"))
+    {
+      modemTest();
+      return true;
+    }
+    if (value.substring(0, 4).equalsIgnoreCase("apn="))
+    {
+      String apn = value.substring(4);
+      apn.trim();
+      apn.toCharArray(liveData->settings.modemApn, sizeof(liveData->settings.modemApn));
+      saveSettings();
+      syslog->printf("modem APN set to: %s (run 'modem=reset' to apply)\n", liveData->settings.modemApn);
+      return true;
+    }
+    if (value.substring(0, 4).equalsIgnoreCase("pin="))
+    {
+      String pin = value.substring(4);
+      pin.trim();
+      pin.toCharArray(liveData->settings.modemPin, sizeof(liveData->settings.modemPin));
+      saveSettings();
+      syslog->printf("modem SIM PIN set to: %s (run 'modem=reset' to apply)\n", (strlen(liveData->settings.modemPin) > 0) ? "****" : "(empty)");
+      return true;
+    }
+    syslog->println("Usage: modem[=info|reset|test|apn=<apn>|pin=<pin>]");
+    return true;
+  }
+
+  auto flagSetting = [&](const char *name, uint8_t &field) -> bool
+  {
+    if (!key.equalsIgnoreCase(name))
+      return false;
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        field = b;
+        saveSettings();
+        syslog->printf("%s set to: %s\n", name, (field == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("%s: %s\n", name, (field == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  };
+  // Prints the current value, or validates a new one. Returns true when the key matched;
+  // 'accepted' tells the caller whether 'newNumber' holds a valid value to store.
+  long newNumber = 0;
+  bool accepted = false;
+  auto numberSetting = [&](const char *name, long current, long minValue, long maxValue) -> bool
+  {
+    if (!key.equalsIgnoreCase(name))
+      return false;
+    accepted = false;
+    if (isSetter)
+    {
+      const long n = value.toInt();
+      if (n >= minValue && n <= maxValue)
+      {
+        newNumber = n;
+        accepted = true;
+        syslog->printf("%s set to: %ld\n", name, n);
+      }
+      else
+      {
+        syslog->printf("Error: Use a value between %ld and %ld\n", minValue, maxValue);
+      }
+    }
+    else
+    {
+      syslog->printf("%s: %ld\n", name, current);
+    }
+    return true;
+  };
+  if (flagSetting("modemEnabled", liveData->settings.modemEnabled) ||
+      flagSetting("modemHttpEnabled", liveData->settings.modemHttpEnabled) ||
+      flagSetting("modemMqttEnabled", liveData->settings.modemMqttEnabled))
+  {
+    return true;
+  }
+  if (numberSetting("modemNetworkMode", liveData->settings.modemNetworkMode, 0, 2))
+  {
+    if (accepted)
+    {
+      liveData->settings.modemNetworkMode = static_cast<uint8_t>(newNumber);
+      saveSettings();
+    }
+    return true;
+  }
+  if (numberSetting("modemSocketTimeoutMs", liveData->settings.modemSocketTimeoutMs, 1000, 60000))
+  {
+    if (accepted)
+    {
+      liveData->settings.modemSocketTimeoutMs = static_cast<uint16_t>(newNumber);
+      saveSettings();
+    }
+    return true;
+  }
+  if (numberSetting("modemRetryBackoffSec", liveData->settings.modemRetryBackoffSec, 1, 300))
+  {
+    if (accepted)
+    {
+      liveData->settings.modemRetryBackoffSec = static_cast<uint16_t>(newNumber);
+      saveSettings();
+    }
+    return true;
+  }
+  if (key.equalsIgnoreCase("modemApn") || key.equalsIgnoreCase("modemPin"))
+  {
+    syslog->println("Use 'modem=apn=<apn>' and 'modem=pin=<pin>' to set these.");
+    if (!isSetter && key.equalsIgnoreCase("modemApn"))
+      syslog->printf("modemApn: %s\n", liveData->settings.modemApn);
+    return true;
+  }
+
   // CAN comparer & record
   if (key.equalsIgnoreCase("record"))
   {
@@ -2674,6 +2831,24 @@ void BoardInterface::showGps()
 }
 
 /**
+ * Cellular modem hooks. Only boards fitted with a modem override these.
+ */
+void BoardInterface::modemInfo()
+{
+  syslog->println("This board has no cellular modem.");
+}
+
+void BoardInterface::modemReset()
+{
+  syslog->println("This board has no cellular modem.");
+}
+
+void BoardInterface::modemTest()
+{
+  syslog->println("This board has no cellular modem.");
+}
+
+/**
  * Show time
  */
 void BoardInterface::showTime()
@@ -2758,6 +2933,11 @@ void BoardInterface::showHelp()
   syslog->println("  sdcardStatus          ... check SD card mount status");
   syslog->println("  gpsStatus             ... check GPS fix, satellites & coordinates (alias: gps)");
   syslog->println("  gpsInit               ... initialize / restart GPS module (alias: gnssStart)");
+  syslog->println("  modem[=info|reset|test|apn=<apn>|pin=<pin>] ... cellular modem status / control");
+  syslog->println("  modemEnabled[=0|1]    ... get/set cellular data connection");
+  syslog->println("  modemNetworkMode[=0|1|2] ... get/set network mode (0 auto, 1 LTE, 2 GSM)");
+  syslog->println("  modemHttpEnabled[=0|1], modemMqttEnabled[=0|1] ... allow HTTP / MQTT over the modem");
+  syslog->println("  modemSocketTimeoutMs[=ms], modemRetryBackoffSec[=sec] ... modem timing");
   syslog->println("  gpsModuleType[=0..3]  ... get/set GPS (0=none,1=M8N,2=GNSS,3=v2.1)");
   syslog->println("  gpsPort[=0|2|255]     ... get/set GPS hardware serial port");
   syslog->println("  gpsSpeed[=baud]       ... get/set GPS baud rate");
