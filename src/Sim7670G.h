@@ -87,6 +87,12 @@ public:
   bool isSocketDataPending(uint8_t linkId) const { return (linkId < kMaxSockets) && socketDataPending[linkId]; }
   bool resolveHost(const char *host, IPAddress &out);
   bool sendSync(const String &command, uint32_t timeoutMs, String *outResponse = nullptr);
+  // Time over cellular. ESP32 SNTP runs on the WiFi lwIP stack and cannot use
+  // the modem, so the modem's own NTP client (AT+CNTP) / NITZ clock is used.
+  // requestNtp() triggers an async modem NTP update; readClockUtc() reads
+  // AT+CCLK? and returns true with UTC epoch when the clock looks valid.
+  bool requestNtp(const char *server);
+  bool readClockUtc(time_t &utcOut);
 
   State state() const { return currentState; }
   const char *stateName() const;
@@ -134,6 +140,11 @@ private:
   bool stepBusy = false;
   uint8_t initStep = 0;
   uint8_t pollStep = 0;
+  // AT+COPS? is slow (the modem queries the network for the operator name, often
+  // 1-3 s) and holds the shared UART, delaying MQTT sends. The operator name is
+  // effectively static, so it is only refreshed every kCopsPollEvery cycles.
+  uint16_t copsPollCounter = 0;
+  static constexpr uint16_t kCopsPollEvery = 30;
   uint32_t nextActionMs = 0;
   bool netOpenPending = false;
   uint32_t netOpenSentMs = 0;
@@ -149,11 +160,35 @@ private:
   bool socketOpenDone[kMaxSockets] = {false, false};
   int socketOpenResult[kMaxSockets] = {-1, -1};
 
+  // Per-socket receive ring buffers.
+  //
+  // The SIM7670G firmware here pushes received socket data unsolicited as
+  //   +CCHRECV: DATA,<mux>,<len>\r\n<len raw bytes>
+  // and rejects the manual AT+CCHRECV=<mux>,<len> poll with ERROR. So the driver
+  // captures the pushed bytes into these buffers whenever readUart() runs, and
+  // readSocketData() drains from them instead of polling the modem.
+  static constexpr size_t kSocketRxBufferSize = 2048;
+  uint8_t socketRxBuffer[kMaxSockets][kSocketRxBufferSize];
+  size_t socketRxHead[kMaxSockets] = {0, 0};
+  size_t socketRxTail[kMaxSockets] = {0, 0};
+  // Active while consuming the raw byte payload of a +CCHRECV: DATA / +CIPRXGET
+  // push into socketRxBuffer[captureLinkId].
+  bool captureMode = false;
+  uint8_t captureLinkId = 0;
+  size_t captureRemaining = 0;
+
+  size_t socketRxAvailable(uint8_t linkId) const;
+  void socketRxPush(uint8_t linkId, uint8_t byte);
+  size_t socketRxDrain(uint8_t linkId, uint8_t *buf, size_t maxLen);
+
   // Synchronous command execution support
   bool syncWaiting = false;
   bool syncSuccess = false;
   String syncResponseBuffer;
   bool promptWaiting = false;
+  // Set when an ERROR/CME ERROR line arrives while waiting for a '>' send prompt,
+  // so sendSocketData can fail fast instead of blocking until timeout.
+  bool promptError = false;
 
   // Raw socket receive state
   bool rawRxMode = false;

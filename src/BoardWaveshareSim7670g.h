@@ -55,6 +55,7 @@ public:
   void updateBatteryState() override;
   void batteryInfo() override;
   NetTransport *activeTransport() override;
+  void ntpSync() override;
 
 private:
   void checkPinConflicts();

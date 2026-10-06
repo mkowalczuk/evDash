@@ -227,6 +227,36 @@ bool BoardWaveshareSim7670g::sdBegin()
   return true;
 }
 
+void BoardWaveshareSim7670g::ntpSync()
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    BoardCore::ntpSync();
+    return;
+  }
+  if (!modem.dataReady())
+  {
+    syslog->printf("[NTP] Cannot sync: no WiFi and modem not online (state=%s, SIM %s).\n",
+                   modem.stateName(), modem.info().simReady ? "ready" : "NOT ready");
+    return;
+  }
+
+  // Modem clock may already be valid from NITZ or an earlier AT+CNTP.
+  time_t utc = 0;
+  if (!modem.readClockUtc(utc))
+  {
+    syslog->println("[NTP] Requesting time via modem (AT+CNTP), will read clock on next retry.");
+    modem.requestNtp("pool.ntp.org");
+    return;
+  }
+
+  setSystemTimeUtc(utc, "NTP/GSM");
+  liveData->params.currTimeSyncWithGps = false;
+  liveData->params.ntpTimeSet = true;
+  syslog->println("[NTP] Time synchronized via cellular modem.");
+  showTime();
+}
+
 NetTransport *BoardWaveshareSim7670g::activeTransport()
 {
   if (liveData == nullptr)

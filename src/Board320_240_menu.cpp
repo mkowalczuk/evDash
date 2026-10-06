@@ -479,7 +479,8 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     suffix = tmpStr1;
     break;
   case MENU_DAYLIGHT_SAVING:
-    suffix = (liveData->settings.daylightSaving == 1) ? "[on]" : "[off]";
+    suffix = (liveData->settings.daylightSaving == 2) ? "[auto]" :
+             (liveData->settings.daylightSaving == 1) ? "[on]" : "[off]";
     break;
   case MENU_SPEED_CORRECTION:
     sprintf(tmpStr1, "[%d]", liveData->settings.speedCorrection);
@@ -1698,11 +1699,15 @@ void Board320_240::menuItemClick()
       break;
     case MENU_TIMEZONE:
       liveData->settings.timezone = (liveData->settings.timezone == 14) ? -11 : liveData->settings.timezone + 1;
+      applyTimezone();
       showMenu();
       return;
       break;
     case MENU_DAYLIGHT_SAVING:
-      liveData->settings.daylightSaving = (liveData->settings.daylightSaving == 1) ? 0 : 1;
+      // Cycle: 2 (auto) -> 1 (on) -> 0 (off) -> 2 (auto)
+      liveData->settings.daylightSaving = (liveData->settings.daylightSaving == 2) ? 1 :
+                                          (liveData->settings.daylightSaving == 1) ? 0 : 2;
+      applyTimezone();
       showMenu();
       return;
       break;

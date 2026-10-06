@@ -53,7 +53,9 @@ public:
   virtual void batteryInfo();
   void showHelp();
   void processSerialConsole();
+  void applyTimezone();
   virtual void setTime(String timestamp);
+  virtual void setSystemTimeUtc(time_t epoch, const char *sourceTag = "SYS");
   virtual void setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds) = 0;
   virtual void ntpSync() = 0;
   virtual void syncRtcFromSystemTime() {}

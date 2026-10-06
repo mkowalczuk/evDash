@@ -219,7 +219,7 @@ void BoardInterface::loadSettings()
   tmpStr.toCharArray(liveData->settings.abrpApiToken, tmpStr.length() + 1);
   // v11
   liveData->settings.timezone = 0;
-  liveData->settings.daylightSaving = 0;
+  liveData->settings.daylightSaving = 2; // 2 = auto DST (POSIX rule based on timezone), 1 = on, 0 = off
   liveData->settings.rightHandDrive = 0;
   // v12
   tmpStr = "empty";
@@ -709,6 +709,7 @@ void BoardInterface::loadSettings()
   }
 
   syslog->setDebugLevel(liveData->settings.debugLevel);
+  applyTimezone();
 }
 
 /**
@@ -1687,8 +1688,10 @@ bool BoardInterface::customConsoleCommand(String cmd)
     if (isSetter)
     {
       liveData->settings.timezone = static_cast<int8_t>(value.toInt());
+      applyTimezone();
       saveSettings();
       syslog->printf("timezone set to: %d\n", liveData->settings.timezone);
+      showTime();
     }
     else
     {
@@ -1700,21 +1703,34 @@ bool BoardInterface::customConsoleCommand(String cmd)
   {
     if (isSetter)
     {
-      int8_t b = parseBool(value);
-      if (b != -1)
+      int8_t b = -1;
+      if (value.equalsIgnoreCase("auto") || value.equalsIgnoreCase("2"))
       {
-        liveData->settings.daylightSaving = b;
-        saveSettings();
-        syslog->printf("daylightSaving set to: %s\n", (liveData->settings.daylightSaving == 1) ? "ON (1)" : "OFF (0)");
+        b = 2;
       }
       else
       {
-        syslog->println("Error: Use 1/0, on/off, true/false");
+        b = parseBool(value);
+      }
+      if (b != -1)
+      {
+        liveData->settings.daylightSaving = b;
+        applyTimezone();
+        saveSettings();
+        const char *desc = (b == 2) ? "AUTO (2)" : (b == 1) ? "ON (1)" : "OFF (0)";
+        syslog->printf("daylightSaving set to: %s\n", desc);
+        showTime();
+      }
+      else
+      {
+        syslog->println("Error: Use auto (2), 1/0, on/off, true/false");
       }
     }
     else
     {
-      syslog->printf("daylightSaving: %s\n", (liveData->settings.daylightSaving == 1) ? "ON (1)" : "OFF (0)");
+      const uint8_t b = liveData->settings.daylightSaving;
+      const char *desc = (b == 2) ? "AUTO (2)" : (b == 1) ? "ON (1)" : "OFF (0)";
+      syslog->printf("daylightSaving: %s\n", desc);
     }
     return true;
   }
@@ -3175,10 +3191,47 @@ void BoardInterface::batteryInfo()
 }
 
 /**
+ * Apply timezone and daylight saving rules to system C runtime.
+ * Supports auto daylight saving (EU/standard DST rules) via POSIX TZ.
+ */
+void BoardInterface::applyTimezone()
+{
+  const int8_t tz = liveData->settings.timezone;
+  const uint8_t dst = liveData->settings.daylightSaving; // 0=off, 1=forced on, 2=auto
+
+  char tzStr[64];
+  // POSIX TZ format: std offset dst [offset],start[/time],end[/time]
+  // In POSIX, positive offset means WEST of UTC, negative offset means EAST of UTC.
+  const int posixStdOffset = -tz;
+
+  if (dst == 2)
+  {
+    // Auto DST (Europe/standard rule: starts last Sun March 02:00, ends last Sun Oct 03:00)
+    const int posixDstOffset = posixStdOffset - 1;
+    snprintf(tzStr, sizeof(tzStr), "GMT%+dDST%+d,M3.5.0/2,M10.5.0/3", posixStdOffset, posixDstOffset);
+  }
+  else if (dst == 1)
+  {
+    // Forced DST on (+1h offset permanently applied)
+    const int posixDstOffset = posixStdOffset - 1;
+    snprintf(tzStr, sizeof(tzStr), "GMT%+d", posixDstOffset);
+  }
+  else
+  {
+    // DST off (standard time only)
+    snprintf(tzStr, sizeof(tzStr), "GMT%+d", posixStdOffset);
+  }
+
+  setenv("TZ", tzStr, 1);
+  tzset();
+}
+
+/**
  * Show time
  */
 void BoardInterface::showTime()
 {
+  applyTimezone();
   struct tm now;
   if (getLocalTime(&now, 0))
   {
@@ -3342,6 +3395,15 @@ void BoardInterface::setTime(String timestamp)
 
   syslog->println("New time set. Only M5 Core2 is supported.");
   showTime();
+}
+
+/**
+ * Default implementation for BoardInterface::setSystemTimeUtc
+ */
+void BoardInterface::setSystemTimeUtc(time_t epoch, const char *sourceTag)
+{
+  (void)epoch;
+  (void)sourceTag;
 }
 
 /**

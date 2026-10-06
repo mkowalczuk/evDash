@@ -262,7 +262,8 @@ protected:
   void updateGyroSensorMotion(float gyroX, float gyroY, float gyroZ, float accX, float accY, float accZ);
   void syncGPS();
   void syncTimes(time_t newTime);
-  virtual void setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds);
+  void setSystemTimeUtc(time_t epoch, const char *sourceTag = "SYS") override;
+  void setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds) override;
   // Notwork
   bool wifiSetup() override;
   void netLoop();

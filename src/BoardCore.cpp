@@ -690,6 +690,7 @@ void BoardCore::seedSystemClock()
   tv.tv_sec = rtcReadTime();
   tv.tv_usec = 0;
 
+  applyTimezone();
   settimeofday(&tv, NULL);
   sntp_set_time_sync_notification_cb(sntpTimeSyncNotificationCallback);
   struct tm tm;
@@ -715,14 +716,15 @@ void BoardCore::ntpSync()
     return;
   }
 
-  syslog->printf("[NTP] Starting time sync via SNTP (tz=%d, dst=%d)...\n",
+  applyTimezone();
+  syslog->printf("[NTP] Starting time sync via SNTP (tz=%d, dst=%s)...\n",
                  liveData->settings.timezone,
-                 liveData->settings.daylightSaving);
+                 (liveData->settings.daylightSaving == 2) ? "auto" :
+                 (liveData->settings.daylightSaving == 1) ? "on" : "off");
   const char *ntpServer1 = "pool.ntp.org";
   const char *ntpServer2 = "time.cloudflare.com";
   const char *ntpServer3 = "129.6.15.28"; // NIST, avoids DNS dependency
-  configTime(liveData->settings.timezone * 3600, liveData->settings.daylightSaving * 3600,
-             ntpServer1, ntpServer2, ntpServer3);
+  configTime(0, 0, ntpServer1, ntpServer2, ntpServer3);
 }
 
 /**
@@ -954,6 +956,39 @@ static time_t utcToEpoch(uint16_t year, uint8_t month, uint8_t day, uint8_t hour
  * sets the system time using settimeofday(), and syncs other times.
  * Also sets the time on the M5Stack Core2 RTC module if being used.
  */
+void BoardCore::setSystemTimeUtc(time_t epoch, const char *sourceTag)
+{
+  if (epoch < 1704067200) // 2024-01-01 00:00:00 UTC
+  {
+    return;
+  }
+
+  // Ensure timezone / DST rules are active for local time conversion
+  applyTimezone();
+
+  struct timeval now = {.tv_sec = epoch, .tv_usec = 0};
+  settimeofday(&now, NULL);
+
+  struct tm check;
+  if (!getLocalTime(&check, 50))
+  {
+    syslog->printf("[%s] Time set rejected by system clock.\n", sourceTag ? sourceTag : "SYS");
+    return;
+  }
+
+  struct tm utcTm;
+  gmtime_r(&epoch, &utcTm);
+  syslog->printf("[%s] System time synced: %04u-%02u-%02u %02u:%02u:%02u UTC\n",
+                 sourceTag ? sourceTag : "SYS",
+                 utcTm.tm_year + 1900, utcTm.tm_mon + 1, utcTm.tm_mday,
+                 utcTm.tm_hour, utcTm.tm_min, utcTm.tm_sec);
+
+  syncTimes(epoch);
+  rtcWriteTime(epoch);
+  liveData->params.currentTime = epoch;
+  cachedNowEpoch = epoch;
+}
+
 void BoardCore::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t seconds)
 {
   // Sanity check incoming GPS date and time values.
@@ -975,24 +1010,8 @@ void BoardCore::setGpsTime(uint16_t year, uint8_t month, uint8_t day, uint8_t ho
     return;
   }
 
-  struct timeval now = {.tv_sec = t, .tv_usec = 0};
-  settimeofday(&now, NULL);
-
-  struct tm check;
-  if (!getLocalTime(&check, 50))
-  {
-    syslog->println("GPS time set rejected by system clock.");
-    return;
-  }
-
   liveData->params.currTimeSyncWithGps = true;
-  syslog->printf("[GPS] System time synced: %04u-%02u-%02u %02u:%02u:%02u UTC\n",
-                 year, month, day, hour, minute, seconds);
-
-  syncTimes(t);
-  rtcWriteTime(t);
-  liveData->params.currentTime = t;
-  cachedNowEpoch = t;
+  setSystemTimeUtc(t, "GPS");
 }
 
 /**

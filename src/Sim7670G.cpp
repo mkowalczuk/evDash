@@ -45,6 +45,7 @@ void Sim7670G::reset()
   stepBusy = false;
   initStep = 0;
   pollStep = 0;
+  copsPollCounter = 0;
   nextActionMs = 0;
   netOpenPending = false;
   apnWarned = false;
@@ -67,10 +68,16 @@ void Sim7670G::reset()
     socketDataPending[i] = false;
     socketOpenDone[i] = false;
     socketOpenResult[i] = -1;
+    socketRxHead[i] = 0;
+    socketRxTail[i] = 0;
   }
+  captureMode = false;
+  captureLinkId = 0;
+  captureRemaining = 0;
   syncWaiting = false;
   syncSuccess = false;
   promptWaiting = false;
+  promptError = false;
   rawRxMode = false;
   rawRxExpected = 0;
   rawRxReceived = 0;
@@ -133,6 +140,20 @@ void Sim7670G::readUart()
       if (rawRxReceived >= rawRxExpected)
       {
         rawRxExpected = 0;
+      }
+      continue;
+    }
+
+    // Consuming the raw payload that follows a "+CCHRECV: DATA,<mux>,<len>" (or
+    // "+CIPRXGET") push. These bytes are not AT lines; they go straight into the
+    // socket's ring buffer.
+    if (captureMode && captureRemaining > 0)
+    {
+      socketRxPush(captureLinkId, static_cast<uint8_t>(raw));
+      captureRemaining--;
+      if (captureRemaining == 0)
+      {
+        captureMode = false;
       }
       continue;
     }
@@ -215,6 +236,21 @@ bool Sim7670G::isUrc(const String &line) const
 void Sim7670G::handleLine(const String &line)
 {
   syslog->info(DEBUG_NET, String("MODEM < ") + line);
+
+  // While waiting for a '>' send prompt (AT+CCHSEND / AT+CIPSEND), the modem may
+  // instead answer with ERROR if the send was rejected (wrong state, closed
+  // link, bad length). Capture that so sendSocketData can abort immediately
+  // rather than spinning until its timeout.
+  if (promptWaiting && !syncWaiting && !commandInFlight)
+  {
+    bool ok = false;
+    if (isFinalResult(line, ok) && !ok)
+    {
+      promptError = true;
+      promptWaiting = false;
+      return;
+    }
+  }
 
   if (commandInFlight)
   {
@@ -400,6 +436,45 @@ void Sim7670G::handleUrc(const String &line)
     if (linkId >= 0 && linkId < kMaxSockets)
     {
       socketConnected[linkId] = false;
+    }
+  }
+  else if (line.startsWith("+CCHRECV:"))
+  {
+    // Two shapes:
+    //   +CCHRECV: DATA,<mux>,<len>  -> <len> raw bytes follow immediately (push)
+    //   +CCHRECV: <mux>,<len>       -> length-only notification
+    const int dataPos = line.indexOf("DATA,");
+    if (dataPos >= 0)
+    {
+      String rest = line.substring(dataPos + 5); // after "DATA,"
+      const int comma = rest.indexOf(',');
+      if (comma > 0)
+      {
+        const int mux = rest.substring(0, comma).toInt();
+        const int len = rest.substring(comma + 1).toInt();
+        if (mux >= 0 && mux < kMaxSockets && len > 0)
+        {
+          captureLinkId = static_cast<uint8_t>(mux);
+          captureRemaining = static_cast<size_t>(len);
+          captureMode = true;
+          socketDataPending[mux] = true;
+        }
+      }
+    }
+    else
+    {
+      const int colon = line.indexOf(':');
+      String rest = line.substring(colon + 1);
+      rest.trim();
+      const int comma = rest.indexOf(',');
+      if (comma > 0)
+      {
+        const int mux = rest.substring(0, comma).toInt();
+        if (mux >= 0 && mux < kMaxSockets)
+        {
+          socketDataPending[mux] = true;
+        }
+      }
     }
   }
   else if (line.startsWith("+CIPRXGET: 1,"))
@@ -913,8 +988,28 @@ void Sim7670G::pollStatus()
            {
              modemInfo.rssiDbm = parseSignalDbm(response);
            }
-           pollStep = registered() ? 3 : 0;
-           nextActionMs = millis() + (registered() ? 200 : pollIntervalMs());
+           if (!registered())
+           {
+             pollStep = 0;
+             nextActionMs = millis() + pollIntervalMs();
+             return;
+           }
+           // Only spend a (slow) AT+COPS? when we still need the operator name or
+           // once every kCopsPollEvery cycles; otherwise end the cycle here so the
+           // UART is free for MQTT between polls.
+           const bool needOperator = (modemInfo.operatorName.length() == 0);
+           const bool periodicRefresh = (++copsPollCounter >= kCopsPollEvery);
+           if (needOperator || periodicRefresh)
+           {
+             copsPollCounter = 0;
+             pollStep = 3;
+             nextActionMs = millis() + 200;
+           }
+           else
+           {
+             pollStep = 0;
+             nextActionMs = millis() + pollIntervalMs();
+           }
          });
     break;
   default:
@@ -1057,6 +1152,64 @@ bool Sim7670G::sendSync(const String &command, uint32_t timeoutMs, String *outRe
   return ok;
 }
 
+bool Sim7670G::requestNtp(const char *server)
+{
+  if (currentState != STATE_NET_OPEN || server == nullptr || server[0] == '\0')
+  {
+    return false;
+  }
+  // Let the network (NITZ) keep the modem clock updated as well.
+  sendSync("AT+CTZU=1", 1000);
+  if (!sendSync(String("AT+CNTP=\"") + server + "\",0", 2000))
+  {
+    return false;
+  }
+  // Result arrives later as URC "+CNTP: <err>"; clock is read via readClockUtc().
+  return sendSync("AT+CNTP", 2000);
+}
+
+bool Sim7670G::readClockUtc(time_t &utcOut)
+{
+  String resp;
+  if (!sendSync("AT+CCLK?", 2000, &resp))
+  {
+    return false;
+  }
+  // +CCLK: "yy/MM/dd,hh:mm:ss±zz"  (local time, zz = quarter hours)
+  const int q = resp.indexOf("+CCLK: \"");
+  if (q < 0)
+  {
+    return false;
+  }
+  int yy, MM, dd, hh, mm, ss, tz = 0;
+  char sign = '+';
+  const char *p = resp.c_str() + q + 8;
+  const int n = sscanf(p, "%d/%d/%d,%d:%d:%d%c%d", &yy, &MM, &dd, &hh, &mm, &ss, &sign, &tz);
+  if (n < 6 || yy < 24 || yy > 99 || MM < 1 || MM > 12 || dd < 1 || dd > 31 ||
+      hh > 23 || mm > 59 || ss > 60)
+  {
+    syslog->info(DEBUG_NET, String("MODEM: clock not set yet: ") + firstLine(resp));
+    return false;
+  }
+  // Days from civil (Howard Hinnant), avoids TZ-dependent mktime().
+  int y = 2000 + yy - (MM <= 2 ? 1 : 0);
+  const int era = y / 400;
+  const unsigned yoe = static_cast<unsigned>(y - era * 400);
+  const unsigned doy = (153 * (MM + (MM > 2 ? -3 : 9)) + 2) / 5 + dd - 1;
+  const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  const int64_t days = static_cast<int64_t>(era) * 146097 + doe - 719468;
+  // On SIMCom SIM7670 (synced via AT+CNTP="...",0 / AT+CTZU=1), the RTC time
+  // in AT+CCLK? is already UTC time. The trailing ±zz is the carrier's NITZ
+  // local timezone offset and must not be subtracted from the UTC clock.
+  int64_t epoch = days * 86400 + hh * 3600 + mm * 60 + ss;
+  if (epoch < 1704067200) // 2024-01-01
+  {
+    return false;
+  }
+  utcOut = static_cast<time_t>(epoch);
+  return true;
+}
+
 bool Sim7670G::openSocket(uint8_t linkId, const char *host, uint16_t port, bool secure, uint32_t timeoutMs)
 {
   if (currentState != STATE_NET_OPEN || host == nullptr || port == 0 || linkId >= kMaxSockets)
@@ -1071,15 +1224,36 @@ bool Sim7670G::openSocket(uint8_t linkId, const char *host, uint16_t port, bool 
 
   socketOpenDone[linkId] = false;
   socketOpenResult[linkId] = -1;
+  // Discard anything left in the ring buffer from a previous session.
+  socketRxHead[linkId] = 0;
+  socketRxTail[linkId] = 0;
+  if (captureMode && captureLinkId == linkId)
+  {
+    captureMode = false;
+    captureRemaining = 0;
+  }
 
   if (secure)
   {
+    // SIM7670G (A76XX family) TLS-over-CCH setup. Order matters:
+    //   1. configure the SSL context (sslversion / authmode / SNI) on context 0
+    //   2. AT+CCHSTART to bring up the SSL/CCH service (activates the PDP context)
+    //   3. AT+CCHSSLCFG to bind SSL context 0 to this channel (must be AFTER CCHSTART)
+    //   4. AT+CCHOPEN to open the connection
+    // The previous order issued CCHSSLCFG and CCHOPEN before CCHSTART, which made
+    // CCHSTART return ERROR and left the stack unusable (connect timed out, state -4).
     sendSync("AT+CSSLCFG=\"sslversion\",0,4", 1000);
     sendSync(String("AT+CSSLCFG=\"authmode\",0,") + ((liveData && liveData->settings.modemTlsInsecure == 0) ? "1" : "0"), 1000);
+    // enableSNI is enough; the SNI host name is taken from the CCHOPEN host.
+    // The explicit AT+CSSLCFG="sni",... sub-command is not supported here and returns ERROR.
     sendSync("AT+CSSLCFG=\"enableSNI\",0,1", 1000);
-    sendSync(String("AT+CSSLCFG=\"sni\",0,\"") + host + "\"", 1000);
-    sendSync(String("AT+CCHSSLCFG=") + linkId + ",0", 1000);
+
+    // Start the SSL/CCH service. ERROR here usually means it is already started
+    // from a previous attempt, which is fine, so the result is intentionally not
+    // treated as fatal. CCHSSLCFG below only works once the service is up.
     sendSync("AT+CCHSTART", 2000);
+
+    sendSync(String("AT+CCHSSLCFG=") + linkId + ",0", 1000);
 
     String cmd = String("AT+CCHOPEN=") + linkId + ",\"" + host + "\"," + port + ",2";
     if (!sendSync(cmd, timeoutMs))
@@ -1155,7 +1329,9 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
     String cmd = secure ? (String("AT+CCHSEND=") + linkId + "," + chunkSize)
                         : (String("AT+CIPSEND=") + linkId + "," + chunkSize);
 
+    syslog->info(DEBUG_NET, String("MODEM [send] > ") + cmd);
     promptWaiting = true;
+    promptError = false;
     uart->print(cmd);
     uart->print("\r\n");
 
@@ -1166,7 +1342,7 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
       readUart();
       if (!promptWaiting)
       {
-        gotPrompt = true;
+        gotPrompt = !promptError;
         break;
       }
     }
@@ -1174,6 +1350,9 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
     if (!gotPrompt)
     {
       promptWaiting = false;
+      syslog->info(DEBUG_NET, promptError
+                                  ? String("MODEM [send] rejected (no prompt, ERROR): ") + cmd
+                                  : String("MODEM [send] timeout waiting for '>' prompt: ") + cmd);
       break;
     }
 
@@ -1196,12 +1375,17 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
 
     if (!ok)
     {
+      syslog->info(DEBUG_NET, String("MODEM [send] no OK after ") + chunkSize + " bytes on link " + linkId);
       break;
     }
 
     sentTotal += chunkSize;
   }
 
+  if (sentTotal > 0)
+  {
+    syslog->info(DEBUG_NET, String("MODEM [send] wrote ") + sentTotal + "/" + len + " bytes on link " + linkId);
+  }
   return sentTotal;
 }
 
@@ -1212,27 +1396,95 @@ int Sim7670G::readSocketData(uint8_t linkId, uint8_t *buf, size_t maxLen, bool s
     return 0;
   }
 
-  size_t fetchLen = (maxLen > 1024) ? 1024 : maxLen;
-  String cmd = secure ? (String("AT+CCHRECV=") + linkId + "," + fetchLen)
-                      : (String("AT+CIPRXGET=2,") + linkId + "," + fetchLen);
+  // Pump the UART so any already-arrived or in-flight pushed data
+  // (+CCHRECV: DATA,<mux>,<len> / +CIPRXGET) is captured into the ring buffer.
+  readUart();
 
-  rawRxTarget = buf;
-  rawRxTargetMax = maxLen;
-  rawRxExpected = 0;
-  rawRxReceived = 0;
-  rawRxMode = true;
+  // For the plain-TCP path, nudge the modem to report/deliver buffered data.
+  // The secure (CCH) path on this firmware pushes data unsolicited and rejects
+  // the manual AT+CCHRECV= poll with ERROR, so we do not issue it there.
+  if (!secure && socketRxAvailable(linkId) == 0)
+  {
+    size_t fetchLen = (maxLen > 1024) ? 1024 : maxLen;
+    String cmd = String("AT+CIPRXGET=2,") + linkId + "," + fetchLen;
+    syslog->info(DEBUG_NET, String("MODEM [recv] > ") + cmd);
+    uart->print(cmd);
+    uart->print("\r\n");
+  }
 
-  uart->print(cmd);
-  uart->print("\r\n");
-
+  // Wait briefly for data to land in the ring buffer, then drain it.
   uint32_t startMs = millis();
-  while (rawRxMode && (millis() - startMs < timeoutMs))
+  while (socketRxAvailable(linkId) == 0 && captureMode == false &&
+         (millis() - startMs < timeoutMs))
+  {
+    readUart();
+    if (socketRxAvailable(linkId) > 0)
+    {
+      break;
+    }
+  }
+  // If a capture is mid-flight, let it finish filling the buffer.
+  while (captureMode && captureLinkId == linkId && (millis() - startMs < timeoutMs))
   {
     readUart();
   }
-  rawRxMode = false;
 
-  return rawRxReceived;
+  size_t n = socketRxDrain(linkId, buf, maxLen);
+  if (socketRxAvailable(linkId) == 0)
+  {
+    socketDataPending[linkId] = false;
+  }
+  if (n > 0)
+  {
+    syslog->info(DEBUG_NET, String("MODEM [recv] got ") + n + " bytes on link " + linkId);
+  }
+  return static_cast<int>(n);
+}
+
+size_t Sim7670G::socketRxAvailable(uint8_t linkId) const
+{
+  if (linkId >= kMaxSockets)
+  {
+    return 0;
+  }
+  const size_t head = socketRxHead[linkId];
+  const size_t tail = socketRxTail[linkId];
+  if (tail >= head)
+  {
+    return tail - head;
+  }
+  return kSocketRxBufferSize - head + tail;
+}
+
+void Sim7670G::socketRxPush(uint8_t linkId, uint8_t byte)
+{
+  if (linkId >= kMaxSockets)
+  {
+    return;
+  }
+  const size_t nextTail = (socketRxTail[linkId] + 1) % kSocketRxBufferSize;
+  if (nextTail == socketRxHead[linkId])
+  {
+    // Buffer full: drop the oldest byte to make room (keep newest data flowing).
+    socketRxHead[linkId] = (socketRxHead[linkId] + 1) % kSocketRxBufferSize;
+  }
+  socketRxBuffer[linkId][socketRxTail[linkId]] = byte;
+  socketRxTail[linkId] = nextTail;
+}
+
+size_t Sim7670G::socketRxDrain(uint8_t linkId, uint8_t *buf, size_t maxLen)
+{
+  if (linkId >= kMaxSockets || buf == nullptr)
+  {
+    return 0;
+  }
+  size_t n = 0;
+  while (n < maxLen && socketRxHead[linkId] != socketRxTail[linkId])
+  {
+    buf[n++] = socketRxBuffer[linkId][socketRxHead[linkId]];
+    socketRxHead[linkId] = (socketRxHead[linkId] + 1) % kSocketRxBufferSize;
+  }
+  return n;
 }
 
 bool Sim7670G::resolveHost(const char *host, IPAddress &out)
