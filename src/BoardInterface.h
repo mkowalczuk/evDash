@@ -43,12 +43,14 @@ public:
   void showTime();
   void showNet();
   virtual NetTransport *activeTransport() { return nullptr; }
+  virtual bool boardCanController() { return false; }
   virtual void showGps();
   virtual void initGPS() {}
   // Cellular modem console hooks. Boards without a modem inherit a message saying so.
   virtual void modemInfo();
   virtual void modemReset();
   virtual void modemTest();
+  virtual void batteryInfo();
   void showHelp();
   void processSerialConsole();
   virtual void setTime(String timestamp);

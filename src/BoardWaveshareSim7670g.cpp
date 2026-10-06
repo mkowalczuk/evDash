@@ -39,7 +39,7 @@ void BoardWaveshareSim7670g::initBoard()
     }
   }
 
-
+  checkPinConflicts();
 }
 
 void BoardWaveshareSim7670g::afterSetup()
@@ -270,6 +270,116 @@ NetTransport *BoardWaveshareSim7670g::activeTransport()
     }
     return &modemTransport;
   }
+}
+
+void BoardWaveshareSim7670g::checkPinConflicts()
+{
+  struct PinAssignment
+  {
+    int pin;
+    const char *name;
+  };
+
+  const PinAssignment pins[] = {
+      {SIM7670G_RX_PIN, "SIM7670G RX"},
+      {SIM7670G_TX_PIN, "SIM7670G TX"},
+      {LOG_SERIAL_RX_PIN, "LOG UART RX"},
+      {LOG_SERIAL_TX_PIN, "LOG UART TX"},
+      {BAT_SDA_PIN, "Battery I2C SDA"},
+      {BAT_SCL_PIN, "Battery I2C SCL"},
+      {SDMMC_CLK_PIN, "SDMMC CLK"},
+      {SDMMC_CMD_PIN, "SDMMC CMD"},
+      {SDMMC_DATA_PIN, "SDMMC DATA"},
+      {SD_CARDDETECT_PIN, "SD Card Detect"},
+      {WS2812B_PIN, "WS2812B RGB"},
+#ifdef CAN_ENABLE
+      {CAN_TX_PIN, "CAN TX"},
+      {CAN_RX_PIN, "CAN RX"},
+#endif
+  };
+
+  bool conflict = false;
+  const size_t count = sizeof(pins) / sizeof(pins[0]);
+  for (size_t i = 0; i < count; i++)
+  {
+    for (size_t j = i + 1; j < count; j++)
+    {
+      if (pins[i].pin == pins[j].pin && pins[i].pin >= 0)
+      {
+        syslog->printf("PIN CONFLICT ERROR: GPIO %d claimed by both '%s' and '%s'!\n",
+                       pins[i].pin, pins[i].name, pins[j].name);
+        conflict = true;
+      }
+    }
+  }
+
+  if (!conflict)
+  {
+    syslog->println("Pin check: OK (no peripheral pin conflicts detected)");
+  }
+}
+
+void BoardWaveshareSim7670g::updateBatteryState()
+{
+  if (liveData->settings.voltmeterEnabled != 1)
+  {
+    return;
+  }
+  if (liveData->params.currentTime - liveData->params.lastVoltageReadTime <= 5)
+  {
+    return;
+  }
+
+  liveData->params.lastVoltageReadTime = liveData->params.currentTime;
+
+  batteryMonitor.configure(liveData->settings.batteryPackType,
+                           liveData->settings.batteryUsbChargeEnabled != 0);
+
+  float rawVoltage = 0.0f;
+  float rawSoc = 0.0f;
+  if (max17048.begin(Wire))
+  {
+    rawVoltage = max17048.getVCell();
+    rawSoc = max17048.getSoC();
+  }
+
+  batteryMonitor.updateSingleGauge(rawVoltage, rawSoc, false);
+
+  if (batteryMonitor.isGaugeReady())
+  {
+    liveData->params.auxVoltage = batteryMonitor.getVoltage();
+    liveData->params.auxPerc = batteryMonitor.getSoc();
+
+    if (liveData->params.auxVoltage > liveData->settings.voltmeterSleep)
+    {
+      liveData->params.lastVoltageOkTime = liveData->params.currentTime;
+    }
+
+    // Protect 1S 18650 battery: require voltage > 2.5V so unread gauge / noise cannot trigger shutdown
+    if (liveData->settings.sleepModeLevel == SLEEP_MODE_SCREEN_ONLY &&
+        liveData->params.auxVoltage > 2.5f &&
+        liveData->params.auxVoltage < liveData->settings.voltmeterCutOff)
+    {
+      syslog->print("AUX voltage under cut-off voltage: ");
+      syslog->println(liveData->settings.voltmeterCutOff);
+      shutdownDevice();
+    }
+  }
+}
+
+void BoardWaveshareSim7670g::batteryInfo()
+{
+  syslog->println(".-[ Battery & Power Management ]-_.");
+  syslog->printf("Gauge Status:   %s (MAX17048 on I2C SDA %d, SCL %d)\n",
+                 batteryMonitor.isGaugeReady() ? "READY" : "NOT READY",
+                 BATTERY_I2C_SDA_PIN, BATTERY_I2C_SCL_PIN);
+  syslog->printf("Battery:        1S 18650 (%s)\n",
+                 batteryMonitor.packTypeName());
+  syslog->printf("USB Charge:     %s\n",
+                 batteryMonitor.isUsbChargeOnly() ? "Enabled (USB power only)" : "Disabled");
+  syslog->printf("Voltage / SoC:  %.2f V  |  %.1f %%\n",
+                 liveData->params.auxVoltage,
+                 liveData->params.auxPerc);
 }
 
 #endif // BOARD_WAVESHARE_SIM7670G

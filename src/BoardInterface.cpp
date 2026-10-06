@@ -33,6 +33,7 @@ It handles attaching communications and live data objects. And provides methods 
 #include "BoardInterface.h"
 #include "CommObd2Ble4.h"
 #include "CommObd2Can.h"
+#include "CommObd2CanTwai.h"
 #include "LiveData.h"
 #include "Solarlib.h"
 #include "CarModelUtils.h"
@@ -324,6 +325,11 @@ void BoardInterface::loadSettings()
   liveData->settings.modemTransportPolicy = 0;
   liveData->settings.modemTlsInsecure = 1;
   liveData->settings.modemDataSaver = 0;
+  // v35
+  liveData->settings.batteryPackCells = 1;
+  liveData->settings.batteryPackCount = 1;
+  liveData->settings.batteryPackType = 0;
+  liveData->settings.batteryUsbChargeEnabled = 1;
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -582,7 +588,7 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 33)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 34;
         liveData->tmpSettings.modemApnUser[0] = '\0';
         liveData->tmpSettings.modemApnPass[0] = '\0';
         liveData->tmpSettings.modemApnAuth = 0;
@@ -590,6 +596,12 @@ void BoardInterface::loadSettings()
         liveData->tmpSettings.modemTransportPolicy = 0;
         liveData->tmpSettings.modemTlsInsecure = 1;
         liveData->tmpSettings.modemDataSaver = 0;
+      }
+      if (liveData->tmpSettings.settingsVersion == 34)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.batteryPackType = 0;
+        liveData->tmpSettings.batteryUsbChargeEnabled = 1;
       }
 
       // Save upgraded structure
@@ -700,7 +712,14 @@ void BoardInterface::afterSetup()
 
   if (liveData->settings.commType == COMM_TYPE_CAN_COMMU)
   {
-    commInterface = new CommObd2Can();
+    if (boardCanController())
+    {
+      commInterface = new CommObd2CanTwai();
+    }
+    else
+    {
+      commInterface = new CommObd2Can();
+    }
   }
   else
   {
@@ -2704,6 +2723,64 @@ bool BoardInterface::customConsoleCommand(String cmd)
     return true;
   }
 
+  // Battery & Power Management
+  if (key.equalsIgnoreCase("battery"))
+  {
+    if (!isSetter || value.length() == 0 || value.equalsIgnoreCase("info"))
+    {
+      batteryInfo();
+      return true;
+    }
+    if (value.substring(0, 5).equalsIgnoreCase("type="))
+    {
+      int t = value.substring(5).toInt();
+      if (t >= 0 && t <= 2)
+      {
+        liveData->settings.batteryPackType = static_cast<uint8_t>(t);
+        saveSettings();
+        const char *tName = (t == 1) ? "LiFePO4 (3.2V nom)" : "Li-ion 18650 (3.7V nom)";
+        syslog->printf("batteryPackType set to: %u (%s)\n", liveData->settings.batteryPackType, tName);
+      }
+      else
+      {
+        syslog->println("Error: Use 0=Li-ion (3.7V), 1=LiFePO4 (3.2V)");
+      }
+      return true;
+    }
+    if (value.substring(0, 10).equalsIgnoreCase("usbcharge="))
+    {
+      int8_t b = parseBool(value.substring(10));
+      if (b != -1)
+      {
+        liveData->settings.batteryUsbChargeEnabled = static_cast<uint8_t>(b);
+        saveSettings();
+        syslog->printf("batteryUsbChargeEnabled set to: %s\n", (b == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+      return true;
+    }
+    syslog->println("Usage: battery[=info|type=<0|1>|usbcharge=<0|1>]");
+    return true;
+  }
+  if (flagSetting("batteryUsbChargeEnabled", liveData->settings.batteryUsbChargeEnabled) ||
+      flagSetting("batteryUsbCharge", liveData->settings.batteryUsbChargeEnabled))
+  {
+    return true;
+  }
+  if (numberSetting("batteryPackType", liveData->settings.batteryPackType, 0, 2) ||
+      numberSetting("batteryType", liveData->settings.batteryPackType, 0, 2))
+  {
+    if (accepted)
+    {
+      liveData->settings.batteryPackType = static_cast<uint8_t>(newNumber);
+      saveSettings();
+    }
+    return true;
+  }
+
   // CAN comparer & record
   if (key.equalsIgnoreCase("record"))
   {
@@ -2979,6 +3056,17 @@ void BoardInterface::modemTest()
   syslog->println("This board has no cellular modem.");
 }
 
+void BoardInterface::batteryInfo()
+{
+  syslog->println(".-[ Battery & Power Management ]-_.");
+  syslog->printf("Aux Voltage:    %.2f V\n", liveData->params.auxVoltage);
+  syslog->printf("Aux SoC:        %.1f %%\n", liveData->params.auxPerc);
+  const char *tName = (liveData->settings.batteryPackType == 1) ? "LiFePO4 (3.2V nom)" : "Li-ion 18650 (3.7V nom)";
+  syslog->printf("Battery:        1S 18650 (%s)\n", tName);
+  syslog->printf("USB Charge:     %s\n",
+                 (liveData->settings.batteryUsbChargeEnabled != 0) ? "Enabled" : "Disabled");
+}
+
 /**
  * Show time
  */
@@ -3083,6 +3171,9 @@ void BoardInterface::showHelp()
   syslog->println("  voltmeterWakeUpVol[=v]... get/set voltmeter wake-up voltage threshold");
   syslog->println("  voltmeterCutOffVol[=v]... get/set voltmeter cut-off voltage threshold");
   syslog->println("  voltmeterInfo         ... print current voltmeter readings");
+  syslog->println("  battery[=info|type|usbcharge] ... 18650 battery status / configuration");
+  syslog->println("  batteryPackType[=0|1] ... get/set battery chemistry (0=Li-ion, 1=LiFePO4)");
+  syslog->println("  batteryUsbChargeEnabled[=0|1] ... get/set charge only when USB powered");
   syslog->println("Remote upload & MQTT:");
   syslog->println("  remoteUploadIntervalSec[=s] ... get/set upload interval (0=disabled)");
   syslog->println("  remoteUploadAbrpIntervalSec[=s] ... get/set ABRP interval");

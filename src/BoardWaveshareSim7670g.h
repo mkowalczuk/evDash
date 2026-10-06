@@ -6,6 +6,7 @@
 #include <SD_MMC.h>
 #include <SPI.h>
 #include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
+#include "BatteryMonitor.h"
 
 
 /**
@@ -50,9 +51,13 @@ public:
   void modemInfo() override;
   void modemReset() override;
   void modemTest() override;
+  bool boardCanController() override { return true; }
+  void updateBatteryState() override;
+  void batteryInfo() override;
   NetTransport *activeTransport() override;
 
 private:
+  void checkPinConflicts();
   // Opens the AT UART and hands it to the modem driver. The driver probes the
   // modem from the main loop, so boot does not wait for it to answer.
   void modemBegin();
@@ -65,4 +70,5 @@ private:
   ModemTransport modemTransport;
   bool gpsFed = false;
   SFE_MAX1704X max17048;
+  BatteryMonitor batteryMonitor;
 };
