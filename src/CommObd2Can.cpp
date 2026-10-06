@@ -33,73 +33,33 @@ void CommObd2Can::connectDevice()
   syslog->println("CAN connectDevice");
   connectStatus = "Connecting...";
 
-  // CAN = new MCP_CAN(pinCanCs); // todo: remove if smart pointer is ok
-  CAN.reset(new MCP_CAN(&SPI, pinCanCs)); // smart pointer so it's automatically cleaned when out of context and also free to re-init
-  sentCanData = false;
-  if (CAN == nullptr)
+  if (canDriver == nullptr)
   {
-    syslog->println("Error: Not enough memory to instantiate CAN class");
+    canDriver.reset(new Mcp2515CanDriver(pinCanCs, pinCanInt));
+  }
+  sentCanData = false;
+  if (canDriver == nullptr)
+  {
+    syslog->println("Error: Not enough memory to instantiate CAN driver");
     syslog->println("init_can() failed");
     connectStatus = "Not enough memory";
     liveData->commConnected = false;
     return;
   }
 
-  // Initialize MCP2515 (8MHz crystal, 500 kbit/s). MCP_STDEXT puts both RX buffers in
-  // filter mode, but the masks default to 0x00000000 (= all id bits don't-care = accept
-  // all), so reception is unfiltered unless a car below programs explicit masks/filters.
-  if (CAN->begin(MCP_STDEXT, CAN_500KBPS, MCP_8MHZ) == CAN_OK)
+  if (canDriver->begin(500000, liveData->settings.carType))
   {
-    syslog->println("MCP2515 Initialized Successfully!");
+    syslog->printf("%s Initialized Successfully!\n", canDriver->name());
     connectStatus = "Can ready";
-    // connectAttempts = 3; neverending 3 attempts
   }
   else
   {
-    syslog->println("Error Initializing MCP2515...");
-    connectStatus = "No MCP2515 (check power/wiring)";
+    syslog->printf("Error Initializing %s...\n", canDriver->name());
+    connectStatus = "No CAN device (check power/wiring)";
     connectAttempts = 0;
     liveData->commConnected = false;
     return;
   }
-
-  if (liveData->settings.carType == CAR_BMW_I3_2014)
-  {
-    // initialise mask and filter to allow only receipt of 0x7xx CAN IDs
-    CAN->init_Mask(0, 0, 0x07000000); // Init first mask...
-    CAN->init_Mask(1, 0, 0x07000000); // Init second mask...
-    for (uint8_t i = 0; i < 6; ++i)
-    {
-      CAN->init_Filt(i, 0, 0x06000000); // Init filters
-    }
-  }
-  else if (liveData->settings.carType == CAR_PEUGEOT_E208)
-  {
-    // PSA e-CMP: the OBD port is the live high-speed CAN with hundreds of broadcast
-    // frames/s. With the masks open the MCP2515's two RX buffers overflow with
-    // broadcast and the diagnostic reply is dropped before the firmware reads it
-    // (a plugged-in ELM327 works here because ATCRA programs the same hardware filter).
-    // Accept only the e-208 response IDs. For this library a standard 11-bit id is
-    // written as (id << 16); mask 0x07FF0000 is an exact 11-bit match (see mcp2515_write_mf).
-    CAN->init_Mask(0, 0, 0x07FF0000); // RXB0 exact match
-    CAN->init_Mask(1, 0, 0x07FF0000); // RXB1 exact match
-    CAN->init_Filt(0, 0, 0x07E80000); // 0x7E8 VIN (mode 09)
-    CAN->init_Filt(1, 0, 0x058F0000); // 0x58F charger / DC-DC
-    CAN->init_Filt(2, 0, 0x06820000); // 0x682 VCU
-    CAN->init_Filt(3, 0, 0x06940000); // 0x694 BMS / TBMU
-    CAN->init_Filt(4, 0, 0x06940000); // 0x694 (dup, BMS carries the bulk + multiframe)
-    CAN->init_Filt(5, 0, 0x06940000); // 0x694 (dup)
-  }
-
-  if (MCP2515_OK != CAN->setMode(MCP_NORMAL))
-  { // Set operation mode to normal so the MCP2515 sends acks to received data.
-    syslog->println("Error: CAN->setMode(MCP_NORMAL) failed");
-    connectStatus = "MCP_NORMAL failed";
-    liveData->commConnected = false;
-    return;
-  }
-
-  pinMode(pinCanInt, INPUT); // Configuring pin for /INT input
 
   // Serve first command (ATZ)
   liveData->commConnected = true;
@@ -336,12 +296,12 @@ void CommObd2Can::sendPID(const uint32_t pid, const String &cmd)
   const uint8_t maxSendTries = 3;
   for (; sendTry < maxSendTries; sendTry++)
   {
-    sndStat = CAN->sendMsgBuf(pid, is29bit, 8, txBuf); // 11 bit or 29 bit
-    if (sndStat == CAN_OK)
+    sndStat = canDriver ? canDriver->send(pid, (is29bit != 0), 8, txBuf) : 1;
+    if (sndStat == 0)
       break;
     delay(1);
   }
-  if (sndStat == CAN_OK)
+  if (sndStat == 0)
   {
     if (sendTry > 0)
     {
@@ -411,12 +371,12 @@ void CommObd2Can::sendFlowControlFrame()
   const uint8_t maxSendTries = 3;
   for (; sendTry < maxSendTries; sendTry++)
   {
-    sndStat = CAN->sendMsgBuf(fcId, is29bit, 8, txBuf); // VW:29bit vs others:11 bit
-    if (sndStat == CAN_OK)
+    sndStat = canDriver ? canDriver->send(fcId, (is29bit != 0), 8, txBuf) : 1;
+    if (sndStat == 0)
       break;
     delay(1);
   }
-  if (sndStat == CAN_OK)
+  if (sndStat == 0)
   {
     if (sendTry > 0)
     {
@@ -457,10 +417,16 @@ void CommObd2Can::sendFlowControlFrame()
 uint8_t CommObd2Can::receivePID()
 {
   const uint8_t rxBuffOffset = liveData->bAdditionalStartingChar ? 1 : 0;
-  if (!digitalRead(pinCanInt) && sentCanData == true) // If CAN0_INT pin is low, read receive buffer
+  if (canDriver && canDriver->available() && sentCanData == true)
   {
     syslog->infoNolf(DEBUG_COMM, " CAN READ ");
-    CAN->readMsgBuf(&rxId, &rxLen, rxBuf); // Read data: len = data length, buf = data byte(s)
+    uint32_t rawId = 0;
+    bool isExt = false;
+    if (!canDriver->read(rawId, isExt, rxLen, rxBuf))
+    {
+      return 0xFF;
+    }
+    rxId = rawId;
 
     // Empty response
     if (rxId == 0x00)
@@ -902,11 +868,11 @@ void CommObd2Can::suspendDevice()
   suspendedDevice = true;
   liveData->commConnected = false;
   sentCanData = false;
-  if (CAN)
+  if (canDriver)
   {
-    if (CAN->setMode(MCP_SLEEP) == MCP2515_OK)
+    if (canDriver->sleep())
     {
-      syslog->println("CAN module suspended (MCP_SLEEP mode).");
+      syslog->printf("CAN module suspended (%s sleep mode).\n", canDriver->name());
       connectStatus = "Suspended";
     }
     else
@@ -928,11 +894,11 @@ void CommObd2Can::suspendDevice()
 void CommObd2Can::resumeDevice()
 {
   suspendedDevice = false;
-  if (CAN)
+  if (canDriver)
   {
-    if (CAN->setMode(MCP_NORMAL) == MCP2515_OK)
+    if (canDriver->wake())
     {
-      syslog->println("CAN module resumed (MCP_NORMAL mode).");
+      syslog->printf("CAN module resumed (%s normal mode).\n", canDriver->name());
       connectStatus = "Resumed";
       liveData->commConnected = true; // Update connection status
     }

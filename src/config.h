@@ -412,5 +412,14 @@ typedef struct
 #ifndef WS2812B_PIN
 #define WS2812B_PIN 38 // on-board RGB LED, unused for now
 #endif
+#ifndef CAN_TX_PIN
+#define CAN_TX_PIN 1
+#endif
+#ifndef CAN_RX_PIN
+#define CAN_RX_PIN 2
+#endif
+#ifndef CAN_ENABLE
+#define CAN_ENABLE 1
+#endif
 #endif // BOARD_WAVESHARE_SIM7670G
 
