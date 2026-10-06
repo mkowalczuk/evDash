@@ -281,6 +281,7 @@ protected:
   // a board whose GNSS arrives as NMEA over the modem's AT UART has none.
   virtual int gpsUartRxPin() { return -1; }
   virtual int gpsUartTxPin() { return -1; }
+  virtual void updateBatteryState();
 
 public:
   // Button GPIOs. Read by the shared main loop; a headless board leaves them 0

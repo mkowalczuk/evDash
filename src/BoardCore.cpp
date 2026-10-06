@@ -315,32 +315,8 @@ void BoardCore::mainLoop()
   // Use String constructor to convert int64_t to String
   // syslog->println("Time taken by function: SD card write loop " + String(duration5) + " microseconds");
 
-  // Read voltmeter INA3221 (if enabled)
-  if (liveData->settings.voltmeterEnabled == 1 && liveData->params.currentTime - liveData->params.lastVoltageReadTime > 5)
-  {
-    liveData->params.auxVoltage = ina3221.getBusVoltage_V(1);
-    liveData->params.lastVoltageReadTime = liveData->params.currentTime;
-    if (liveData->params.auxVoltage > liveData->settings.voltmeterSleep)
-    {
-      liveData->params.lastVoltageOkTime = liveData->params.currentTime;
-    }
-
-    // Protect AUX battery in screen only mode
-    if (liveData->settings.sleepModeLevel == SLEEP_MODE_SCREEN_ONLY &&
-        liveData->params.auxVoltage > 5 && liveData->params.auxVoltage < liveData->settings.voltmeterCutOff)
-    {
-      syslog->print("AUX voltage under cut-off voltage: ");
-      syslog->println(liveData->settings.voltmeterCutOff);
-      shutdownDevice();
-    }
-
-    // Calculate AUX perc for ioniq2018
-    if (liveData->settings.carType == CAR_HYUNDAI_IONIQ_2018)
-    {
-      float tmpAuxPerc = (float)(liveData->params.auxVoltage - 11.6) * 100 / (float)(12.8 - 11.6); // min 11.6V; max: 12.8V
-      liveData->params.auxPerc = ((tmpAuxPerc > 100) ? 100 : ((tmpAuxPerc < 0) ? 0 : tmpAuxPerc));
-    }
-  }
+  // Read voltmeter INA3221 or board-specific battery monitor
+  updateBatteryState();
 
   const bool recentlyCharging =
       (liveData->params.lastChargingOnTime != 0 &&
@@ -672,6 +648,35 @@ void BoardCore::mainLoop()
   {
     liveData->clearDrivingAndChargingStats(CAR_MODE_NONE);
   }*/
+}
+
+void BoardCore::updateBatteryState()
+{
+  if (liveData->settings.voltmeterEnabled == 1 && liveData->params.currentTime - liveData->params.lastVoltageReadTime > 5)
+  {
+    liveData->params.auxVoltage = ina3221.getBusVoltage_V(1);
+    liveData->params.lastVoltageReadTime = liveData->params.currentTime;
+    if (liveData->params.auxVoltage > liveData->settings.voltmeterSleep)
+    {
+      liveData->params.lastVoltageOkTime = liveData->params.currentTime;
+    }
+
+    // Protect AUX battery in screen only mode
+    if (liveData->settings.sleepModeLevel == SLEEP_MODE_SCREEN_ONLY &&
+        liveData->params.auxVoltage > 5 && liveData->params.auxVoltage < liveData->settings.voltmeterCutOff)
+    {
+      syslog->print("AUX voltage under cut-off voltage: ");
+      syslog->println(liveData->settings.voltmeterCutOff);
+      shutdownDevice();
+    }
+
+    // Calculate AUX perc for ioniq2018
+    if (liveData->settings.carType == CAR_HYUNDAI_IONIQ_2018)
+    {
+      float tmpAuxPerc = (float)(liveData->params.auxVoltage - 11.6) * 100 / (float)(12.8 - 11.6); // min 11.6V; max: 12.8V
+      liveData->params.auxPerc = ((tmpAuxPerc > 100) ? 100 : ((tmpAuxPerc < 0) ? 0 : tmpAuxPerc));
+    }
+  }
 }
 
 /**

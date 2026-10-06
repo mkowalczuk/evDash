@@ -42,6 +42,8 @@ void LiveData::initParams()
   params.wifiLastConnectedTime = 0;
   params.wifiBackupUptime = 0;
   params.wifiApMode = false;
+  params.wifiConnectAttemptStartMs = 0;
+  params.lastBlePromptReceivedMs = 0;
   // SD card
   params.sdcardInit = false;
   params.sdcardRecording = false;
