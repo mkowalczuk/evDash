@@ -355,7 +355,7 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     {
       suffix = "[none]";
     }
-    else if ((liveData->settings.debugLevel & (DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP)) == (DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP))
+    else if ((liveData->settings.debugLevel & (DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP | DEBUG_MODEM)) == (DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP | DEBUG_MODEM))
     {
       suffix = "[all]";
     }
@@ -379,6 +379,9 @@ String Board320_240::menuItemText(int16_t menuItemId, String title)
     break;
   case MENU_DEBUG_LEVEL_ABRP:
     suffix = (liveData->settings.debugLevel & DEBUG_ABRP) ? "[on]" : "[off]";
+    break;
+  case MENU_DEBUG_LEVEL_MODEM:
+    suffix = (liveData->settings.debugLevel & DEBUG_MODEM) ? "[on]" : "[off]";
     break;
   case MENU_DEBUG_LEVEL_ALL:
     suffix = "[all]";
@@ -1679,8 +1682,15 @@ void Board320_240::menuItemClick()
       showMenu();
       return;
       break;
+    case MENU_DEBUG_LEVEL_MODEM:
+      liveData->settings.debugLevel ^= DEBUG_MODEM;
+      syslog->setDebugLevel(liveData->settings.debugLevel);
+      saveSettings();
+      showMenu();
+      return;
+      break;
     case MENU_DEBUG_LEVEL_ALL:
-      liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
+      liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP | DEBUG_MODEM;
       syslog->setDebugLevel(liveData->settings.debugLevel);
       saveSettings();
       showMenu();

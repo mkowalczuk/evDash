@@ -256,7 +256,7 @@ bool Sim7670G::isUrc(const String &line) const
 
 void Sim7670G::handleLine(const String &line)
 {
-  syslog->info(DEBUG_NET, String("MODEM < ") + line);
+  syslog->info(DEBUG_MODEM, String("MODEM < ") + line);
 
   // While waiting for a '>' send prompt (AT+CCHSEND / AT+CIPSEND), the modem may
   // instead answer with ERROR if the send was rejected (wrong state, closed
@@ -386,7 +386,7 @@ void Sim7670G::handleUrc(const String &line)
       }
       else
       {
-        syslog->info(DEBUG_NET, String("MODEM: data connection refused, code ") + code);
+        syslog->info(DEBUG_MODEM, String("MODEM: data connection refused, code ") + code);
         backoff();
       }
     }
@@ -538,7 +538,7 @@ void Sim7670G::startNextCommand()
   commandInFlight = true;
   inFlightStartMs = millis();
   totalCommands++;
-  syslog->info(DEBUG_NET, String("MODEM > ") + inFlight.text);
+  syslog->info(DEBUG_MODEM, String("MODEM > ") + inFlight.text);
   uart->print(inFlight.text);
   uart->print("\r\n");
 }
@@ -567,7 +567,7 @@ void Sim7670G::checkTimeout()
     return;
   }
   totalTimeouts++;
-  syslog->info(DEBUG_NET, String("MODEM ! timeout: ") + inFlight.text);
+  syslog->info(DEBUG_MODEM, String("MODEM ! timeout: ") + inFlight.text);
   responseBuffer = "timeout";
   completeCommand(false, false);
 }
@@ -618,7 +618,7 @@ void Sim7670G::setState(State next)
   {
     return;
   }
-  syslog->info(DEBUG_NET, String("MODEM state: ") + stateName() + " -> " +
+  syslog->info(DEBUG_MODEM, String("MODEM state: ") + stateName() + " -> " +
                               (next == STATE_OFF ? "OFF" : next == STATE_INIT ? "INIT" : next == STATE_READY ? "READY" : next == STATE_REGISTERED ? "REGISTERED" : "NET_OPEN"));
   currentState = next;
   stepBusy = false;
@@ -731,11 +731,11 @@ void Sim7670G::stepInit()
            }
            if (response.indexOf("SIM PIN") >= 0)
            {
-             syslog->info(DEBUG_NET, pinAttempted
+             syslog->info(DEBUG_MODEM, pinAttempted
                                          ? "MODEM: SIM PIN rejected, check 'modem=pin=XXXX' then 'modem=reset'"
                                          : "MODEM: SIM needs PIN, set it with 'modem=pin=XXXX' then 'modem=reset'");
            }
-           syslog->info(DEBUG_NET, String("MODEM: SIM not ready: ") + response);
+           syslog->info(DEBUG_MODEM, String("MODEM: SIM not ready: ") + response);
            backoff();
          });
     break;
@@ -910,7 +910,7 @@ void Sim7670G::stepRegistered()
          }
          else
          {
-           syslog->info(DEBUG_NET, String("MODEM: AT+NETOPEN failed: ") + response);
+           syslog->info(DEBUG_MODEM, String("MODEM: AT+NETOPEN failed: ") + response);
            backoff();
          }
        });
@@ -1142,7 +1142,7 @@ bool Sim7670G::sendSync(const String &command, uint32_t timeoutMs, String *outRe
   syncWaiting = true;
   totalCommands++;
 
-  syslog->info(DEBUG_NET, String("MODEM [sync] > ") + command);
+  syslog->info(DEBUG_MODEM, String("MODEM [sync] > ") + command);
   uart->print(command);
   uart->print("\r\n");
 
@@ -1157,7 +1157,7 @@ bool Sim7670G::sendSync(const String &command, uint32_t timeoutMs, String *outRe
   {
     syncWaiting = false;
     totalTimeouts++;
-    syslog->info(DEBUG_NET, String("MODEM [sync] timeout: ") + command);
+    syslog->info(DEBUG_MODEM, String("MODEM [sync] timeout: ") + command);
   }
   else
   {
@@ -1209,7 +1209,7 @@ bool Sim7670G::readClockUtc(time_t &utcOut)
   if (n < 6 || yy < 24 || yy > 99 || MM < 1 || MM > 12 || dd < 1 || dd > 31 ||
       hh > 23 || mm > 59 || ss > 60)
   {
-    syslog->info(DEBUG_NET, String("MODEM: clock not set yet: ") + firstLine(resp));
+    syslog->info(DEBUG_MODEM, String("MODEM: clock not set yet: ") + firstLine(resp));
     return false;
   }
   // Days from civil (Howard Hinnant), avoids TZ-dependent mktime().
@@ -1248,7 +1248,7 @@ bool Sim7670G::ensureCaCert()
   const bool listOk = sendSync("AT+CCERTLIST", 3000, &listResp);
   if (!listOk)
   {
-    syslog->info(DEBUG_NET, "MODEM [cert] CCERTLIST query failed; assuming CA present, not re-uploading");
+    syslog->info(DEBUG_MODEM, "MODEM [cert] CCERTLIST query failed; assuming CA present, not re-uploading");
     caCertUploaded = true; // avoid repeated probing/writes this session
     return true;
   }
@@ -1267,7 +1267,7 @@ bool Sim7670G::ensureCaCert()
   // AT+CCERTDOWN="<name>",<len> replies with a '>' prompt, then expects exactly
   // <len> raw bytes of PEM, then OK. Reuse the same prompt handshake as sendSocketData.
   String cmd = String("AT+CCERTDOWN=\"") + kCaCertName + "\"," + len;
-  syslog->info(DEBUG_NET, String("MODEM [cert] > ") + cmd);
+  syslog->info(DEBUG_MODEM, String("MODEM [cert] > ") + cmd);
   promptWaiting = true;
   promptError = false;
   uart->print(cmd);
@@ -1287,7 +1287,7 @@ bool Sim7670G::ensureCaCert()
   if (!gotPrompt)
   {
     promptWaiting = false;
-    syslog->info(DEBUG_NET, "MODEM [cert] no '>' prompt for CCERTDOWN; CA not installed");
+    syslog->info(DEBUG_MODEM, "MODEM [cert] no '>' prompt for CCERTDOWN; CA not installed");
     return false;
   }
 
@@ -1313,11 +1313,11 @@ bool Sim7670G::ensureCaCert()
   if (ok)
   {
     caCertUploaded = true;
-    syslog->info(DEBUG_NET, String("MODEM [cert] uploaded ") + kCaCertName + " (" + len + " bytes)");
+    syslog->info(DEBUG_MODEM, String("MODEM [cert] uploaded ") + kCaCertName + " (" + len + " bytes)");
   }
   else
   {
-    syslog->info(DEBUG_NET, "MODEM [cert] CCERTDOWN failed; server auth will not work");
+    syslog->info(DEBUG_MODEM, "MODEM [cert] CCERTDOWN failed; server auth will not work");
   }
   return ok;
 }
@@ -1372,7 +1372,7 @@ bool Sim7670G::openSocket(uint8_t linkId, const char *host, uint16_t port, bool 
       }
       else
       {
-        syslog->info(DEBUG_NET, "MODEM: CA cert unavailable, falling back to unverified TLS (set modemTlsInsecure=1 to silence)");
+        syslog->info(DEBUG_MODEM, "MODEM: CA cert unavailable, falling back to unverified TLS (set modemTlsInsecure=1 to silence)");
       }
     }
     sendSync(String("AT+CSSLCFG=\"authmode\",0,") + (verify ? "1" : "0"), 1000);
@@ -1461,7 +1461,7 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
     String cmd = secure ? (String("AT+CCHSEND=") + linkId + "," + chunkSize)
                         : (String("AT+CIPSEND=") + linkId + "," + chunkSize);
 
-    syslog->info(DEBUG_NET, String("MODEM [send] > ") + cmd);
+    syslog->info(DEBUG_MODEM, String("MODEM [send] > ") + cmd);
     promptWaiting = true;
     promptError = false;
     uart->print(cmd);
@@ -1482,7 +1482,7 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
     if (!gotPrompt)
     {
       promptWaiting = false;
-      syslog->info(DEBUG_NET, promptError
+      syslog->info(DEBUG_MODEM, promptError
                                   ? String("MODEM [send] rejected (no prompt, ERROR): ") + cmd
                                   : String("MODEM [send] timeout waiting for '>' prompt: ") + cmd);
       break;
@@ -1507,7 +1507,7 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
 
     if (!ok)
     {
-      syslog->info(DEBUG_NET, String("MODEM [send] no OK after ") + chunkSize + " bytes on link " + linkId);
+      syslog->info(DEBUG_MODEM, String("MODEM [send] no OK after ") + chunkSize + " bytes on link " + linkId);
       break;
     }
 
@@ -1516,7 +1516,7 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
 
   if (sentTotal > 0)
   {
-    syslog->info(DEBUG_NET, String("MODEM [send] wrote ") + sentTotal + "/" + len + " bytes on link " + linkId);
+    syslog->info(DEBUG_MODEM, String("MODEM [send] wrote ") + sentTotal + "/" + len + " bytes on link " + linkId);
   }
   return sentTotal;
 }
@@ -1539,7 +1539,7 @@ int Sim7670G::readSocketData(uint8_t linkId, uint8_t *buf, size_t maxLen, bool s
   {
     size_t fetchLen = (maxLen > 1024) ? 1024 : maxLen;
     String cmd = String("AT+CIPRXGET=2,") + linkId + "," + fetchLen;
-    syslog->info(DEBUG_NET, String("MODEM [recv] > ") + cmd);
+    syslog->info(DEBUG_MODEM, String("MODEM [recv] > ") + cmd);
     uart->print(cmd);
     uart->print("\r\n");
   }
@@ -1568,7 +1568,7 @@ int Sim7670G::readSocketData(uint8_t linkId, uint8_t *buf, size_t maxLen, bool s
   }
   if (n > 0)
   {
-    syslog->info(DEBUG_NET, String("MODEM [recv] got ") + n + " bytes on link " + linkId);
+    syslog->info(DEBUG_MODEM, String("MODEM [recv] got ") + n + " bytes on link " + linkId);
   }
   return static_cast<int>(n);
 }

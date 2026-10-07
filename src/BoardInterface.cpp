@@ -887,13 +887,14 @@ bool BoardInterface::customConsoleCommand(String cmd)
   }
   if (cmd.equalsIgnoreCase("debugLevel"))
   {
-    syslog->printf("Debug level bitmask: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
+    syslog->printf("Debug level bitmask: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s, modem=%s)\n",
                    liveData->settings.debugLevel,
                    (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
                    (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
                    (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
                    (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
-                   (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
+                   (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off",
+                   (liveData->settings.debugLevel & DEBUG_MODEM) ? "on" : "off");
     return true;
   }
   // CAN comparer
@@ -2487,13 +2488,13 @@ bool BoardInterface::customConsoleCommand(String cmd)
     {
       if (value.equalsIgnoreCase("all") || value == "255")
       {
-        liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
+        liveData->settings.debugLevel = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP | DEBUG_MODEM;
       }
       else if (value.equalsIgnoreCase("none") || value.equalsIgnoreCase("off") || value == "0")
       {
         liveData->settings.debugLevel = DEBUG_NONE;
       }
-      else if (value.indexOf(',') != -1 || value.startsWith("+") || value.startsWith("-"))
+      else if (value.indexOf(',') != -1 || value.startsWith("+") || value.startsWith("-") || value.startsWith("!"))
       {
         int start = 0;
         while (start < value.length())
@@ -2501,8 +2502,10 @@ bool BoardInterface::customConsoleCommand(String cmd)
           int comma = value.indexOf(',', start);
           String token = (comma == -1) ? value.substring(start) : value.substring(start, comma);
           token.trim();
-          bool remove = token.startsWith("-");
-          if (token.startsWith("+") || token.startsWith("-"))
+          // Relative edit: '-flag' or '!flag' turns a level off, '+flag' (or a
+          // bare name in a list) turns it on, keeping the other levels as-is.
+          bool remove = token.startsWith("-") || token.startsWith("!");
+          if (token.startsWith("+") || token.startsWith("-") || token.startsWith("!"))
             token = token.substring(1);
           uint8_t bit = 0;
           if (token.equalsIgnoreCase("comm"))
@@ -2515,8 +2518,10 @@ bool BoardInterface::customConsoleCommand(String cmd)
             bit = DEBUG_GPS;
           else if (token.equalsIgnoreCase("abrp"))
             bit = DEBUG_ABRP;
+          else if (token.equalsIgnoreCase("modem"))
+            bit = DEBUG_MODEM;
           else if (token.equalsIgnoreCase("all"))
-            bit = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP;
+            bit = DEBUG_COMM | DEBUG_NET | DEBUG_SDCARD | DEBUG_GPS | DEBUG_ABRP | DEBUG_MODEM;
           if (remove)
             liveData->settings.debugLevel &= ~bit;
           else
@@ -2546,29 +2551,35 @@ bool BoardInterface::customConsoleCommand(String cmd)
       {
         liveData->settings.debugLevel = DEBUG_ABRP;
       }
+      else if (value.equalsIgnoreCase("modem"))
+      {
+        liveData->settings.debugLevel = DEBUG_MODEM;
+      }
       else
       {
         liveData->settings.debugLevel = value.toInt();
       }
       syslog->setDebugLevel(liveData->settings.debugLevel);
       saveSettings();
-      syslog->printf("Debug level set to: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
+      syslog->printf("Debug level set to: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s, modem=%s)\n",
                      liveData->settings.debugLevel,
                      (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
-                     (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
+                     (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_MODEM) ? "on" : "off");
     }
     else
     {
-      syslog->printf("Debug level bitmask: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s)\n",
+      syslog->printf("Debug level bitmask: %u (comm=%s, net=%s, sd=%s, gps=%s, abrp=%s, modem=%s)\n",
                      liveData->settings.debugLevel,
                      (liveData->settings.debugLevel & DEBUG_COMM) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_NET) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_SDCARD) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
-                     (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off");
+                     (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off",
+                     (liveData->settings.debugLevel & DEBUG_MODEM) ? "on" : "off");
     }
     return true;
   }
@@ -3262,7 +3273,8 @@ void BoardInterface::showHelp()
   syslog->println("  setTime=YYYY-MM-DD HH:MM:SS ... set clock");
   syslog->println("  ntpSync               ... sync time via NTP");
   syslog->println("  ipconfig              ... print network status");
-  syslog->println("  debugLevel[=n|comm,net,sd,gps,abrp,all,none] ... get/set debug mask");
+  syslog->println("  debugLevel[=n|comm,net,sd,gps,abrp,modem,all,none] ... get/set debug mask");
+  syslog->println("                        use +flag/-flag/!flag to toggle one (e.g. !gps disables GPS, keeps rest)");
   syslog->println("WiFi:");
   syslog->println("  wifiEnabled[=0|1]     ... get/set WiFi enabled");
   syslog->println("  wifiScan              ... scan and list WiFi APs");

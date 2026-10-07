@@ -16,11 +16,12 @@ typedef void (*LogSerialMirrorCallback)(const uint8_t *data, size_t size, void *
 // DEBUG LEVEL (bitmask)
 #define DEBUG_NONE 0          // 0 - no debug messages (quiet)
 #define DEBUG_COMM (1 << 0)   // 1 - comm (BLE/CAN)
-#define DEBUG_NET (1 << 1)    // 2 - network (wifi / gsm / cloud services)
+#define DEBUG_NET (1 << 1)    // 2 - network (wifi / cloud services: MQTT, API, ABRP transport)
 #define DEBUG_GSM DEBUG_NET   // backwards compatibility alias
 #define DEBUG_SDCARD (1 << 2) // 4 - sdcard
 #define DEBUG_GPS (1 << 3)    // 8 - gps
 #define DEBUG_ABRP (1 << 4)   // 16 - abrp telemetry
+#define DEBUG_MODEM (1 << 5)  // 32 - cellular modem AT traffic (SIM7670G)
 #define DEBUG_ALL 0xFF        // 255 - all debug messages
 
 #ifdef BOARD_M5STACK_CORES3
