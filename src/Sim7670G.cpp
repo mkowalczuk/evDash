@@ -3,10 +3,15 @@
 #include "Sim7670G.h"
 #include "LogSerial.h"
 #include "config.h"
+#include "evdash_certs.h"
 
 static constexpr uint32_t kNetOpenTimeoutMs = 30000;
 static constexpr uint32_t kStatusPollMs = 3000;
 static constexpr uint32_t kStatusPollConnectedMs = 10000;
+
+// Filename under which the ISRG Root X1 CA (HiveMQ Cloud / Let's Encrypt chain)
+// is stored in the modem's certificate store for server authentication.
+static const char *const kCaCertName = "isrgrootx1.pem";
 
 // Unsolicited result codes. They can arrive in the middle of a command's reply,
 // so they have to be recognised by prefix and kept out of the response buffer.
@@ -82,6 +87,7 @@ void Sim7670G::reset()
   rawRxExpected = 0;
   rawRxReceived = 0;
   dnsResolved = false;
+  caCertUploaded = false;
 }
 
 bool Sim7670G::send(const String &command, uint32_t timeoutMs, ResponseCallback callback)
@@ -1210,6 +1216,97 @@ bool Sim7670G::readClockUtc(time_t &utcOut)
   return true;
 }
 
+bool Sim7670G::ensureCaCert()
+{
+  if (caCertUploaded)
+  {
+    return true;
+  }
+
+  // The cert persists in modem flash across reboots. To avoid needless flash
+  // writes (wear), query the store first and only upload when the cert is
+  // *confirmed* absent. If AT+CCERTLIST itself fails (transient error, parse
+  // quirk), treat the state as unknown and do NOT upload: a failed query must
+  // not trigger a rewrite on every reset. We assume it is present and proceed;
+  // if it is genuinely missing the handshake fails and the next attempt retries.
+  String listResp;
+  const bool listOk = sendSync("AT+CCERTLIST", 3000, &listResp);
+  if (!listOk)
+  {
+    syslog->info(DEBUG_NET, "MODEM [cert] CCERTLIST query failed; assuming CA present, not re-uploading");
+    caCertUploaded = true; // avoid repeated probing/writes this session
+    return true;
+  }
+  if (listResp.indexOf(kCaCertName) >= 0)
+  {
+    caCertUploaded = true;
+    return true;
+  }
+
+  const size_t len = strlen(ISRG_ROOT_X1);
+  if (len == 0)
+  {
+    return false;
+  }
+
+  // AT+CCERTDOWN="<name>",<len> replies with a '>' prompt, then expects exactly
+  // <len> raw bytes of PEM, then OK. Reuse the same prompt handshake as sendSocketData.
+  String cmd = String("AT+CCERTDOWN=\"") + kCaCertName + "\"," + len;
+  syslog->info(DEBUG_NET, String("MODEM [cert] > ") + cmd);
+  promptWaiting = true;
+  promptError = false;
+  uart->print(cmd);
+  uart->print("\r\n");
+
+  uint32_t startMs = millis();
+  bool gotPrompt = false;
+  while (millis() - startMs < 5000)
+  {
+    readUart();
+    if (!promptWaiting)
+    {
+      gotPrompt = !promptError;
+      break;
+    }
+  }
+  if (!gotPrompt)
+  {
+    promptWaiting = false;
+    syslog->info(DEBUG_NET, "MODEM [cert] no '>' prompt for CCERTDOWN; CA not installed");
+    return false;
+  }
+
+  uart->write(reinterpret_cast<const uint8_t *>(ISRG_ROOT_X1), len);
+
+  // Await final OK/ERROR for the download.
+  syncWaiting = true;
+  syncSuccess = false;
+  syncResponseBuffer = "";
+  startMs = millis();
+  bool ok = false;
+  while (millis() - startMs < 5000)
+  {
+    readUart();
+    if (!syncWaiting)
+    {
+      ok = syncSuccess;
+      break;
+    }
+  }
+  syncWaiting = false;
+
+  if (ok)
+  {
+    caCertUploaded = true;
+    syslog->info(DEBUG_NET, String("MODEM [cert] uploaded ") + kCaCertName + " (" + len + " bytes)");
+  }
+  else
+  {
+    syslog->info(DEBUG_NET, "MODEM [cert] CCERTDOWN failed; server auth will not work");
+  }
+  return ok;
+}
+
 bool Sim7670G::openSocket(uint8_t linkId, const char *host, uint16_t port, bool secure, uint32_t timeoutMs)
 {
   if (currentState != STATE_NET_OPEN || host == nullptr || port == 0 || linkId >= kMaxSockets)
@@ -1243,7 +1340,27 @@ bool Sim7670G::openSocket(uint8_t linkId, const char *host, uint16_t port, bool 
     // The previous order issued CCHSSLCFG and CCHOPEN before CCHSTART, which made
     // CCHSTART return ERROR and left the stack unusable (connect timed out, state -4).
     sendSync("AT+CSSLCFG=\"sslversion\",0,4", 1000);
-    sendSync(String("AT+CSSLCFG=\"authmode\",0,") + ((liveData && liveData->settings.modemTlsInsecure == 0) ? "1" : "0"), 1000);
+
+    // Server authentication (authmode 1) requires a CA cert in the modem store.
+    // When the user asks for verification (modemTlsInsecure == 0), upload the
+    // bundled ISRG Root X1 (HiveMQ Cloud / Let's Encrypt chain) and bind it to
+    // SSL context 0. If provisioning fails, fall back to authmode 0 (still
+    // encrypted, just unverified) so telemetry keeps flowing, with a warning.
+    const bool wantVerify = (liveData && liveData->settings.modemTlsInsecure == 0);
+    bool verify = false;
+    if (wantVerify)
+    {
+      if (ensureCaCert())
+      {
+        sendSync(String("AT+CSSLCFG=\"cacert\",0,\"") + kCaCertName + "\"", 1000);
+        verify = true;
+      }
+      else
+      {
+        syslog->info(DEBUG_NET, "MODEM: CA cert unavailable, falling back to unverified TLS (set modemTlsInsecure=1 to silence)");
+      }
+    }
+    sendSync(String("AT+CSSLCFG=\"authmode\",0,") + (verify ? "1" : "0"), 1000);
     // enableSNI is enough; the SNI host name is taken from the CCHOPEN host.
     // The explicit AT+CSSLCFG="sni",... sub-command is not supported here and returns ERROR.
     sendSync("AT+CSSLCFG=\"enableSNI\",0,1", 1000);

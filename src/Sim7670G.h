@@ -201,6 +201,12 @@ private:
   bool dnsResolved = false;
   IPAddress dnsResolvedIp;
 
+  // TLS server-authentication (authmode 1) requires a CA certificate in the
+  // modem's store. Uploaded lazily on first secure connect; the modem keeps it
+  // in flash, so this just tracks whether we have verified/uploaded it this run.
+  bool caCertUploaded = false;
+  bool ensureCaCert();
+
   void readUart();
   void handleLine(const String &line);
   bool isFinalResult(const String &line, bool &ok) const;
