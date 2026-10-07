@@ -208,6 +208,24 @@ void BoardWaveshareSim7670g::modemBegin()
                            syslog->println("SIM7670G: AT UART responding");
                            initGPS();
                          });
+  // Keep latency-sensitive work alive while the driver blocks on a slow AT
+  // command (TLS connect, DNS, COPS, MQTT I/O). The hook runs from inside the
+  // driver's wait loops, so it must do only work that cannot re-enter the modem:
+  //   - NOT the serial console: a console command (e.g. testMqtt) could call
+  //     back into the modem synchronously and corrupt the in-flight AT state.
+  //   - GPS folding is safe: syncGPS() only consumes bytes the NMEA sink already
+  //     parsed locally and never touches the modem UART.
+  // Then yield the CPU so FreeRTOS/ESP-IDF (WiFi/BLE) keep running. The console
+  // is serviced normally on the next main-loop pass once the wait returns.
+  modem.setYieldHook([this]()
+                     {
+                       if (gpsFed)
+                       {
+                         gpsFed = false;
+                         syncGPS();
+                       }
+                       vTaskDelay(0); // relinquish to FreeRTOS/ESP-IDF (WiFi/BLE)
+                     });
   modem.begin(modemUart, liveData);
 }
 

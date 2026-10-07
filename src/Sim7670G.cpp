@@ -212,6 +212,21 @@ void Sim7670G::readUart()
   }
 }
 
+/**
+ * One iteration of a blocking wait. Always services the modem UART, then hands
+ * control to the yield hook (if set) so GPS/console/other work keeps running
+ * and the CPU is released to FreeRTOS during a slow AT exchange. The hook must
+ * not touch the modem UART (that stays owned by this driver).
+ */
+void Sim7670G::pumpWait()
+{
+  readUart();
+  if (yieldHook)
+  {
+    yieldHook();
+  }
+}
+
 bool Sim7670G::isFinalResult(const String &line, bool &ok) const
 {
   if (line == "OK")
@@ -1117,7 +1132,7 @@ bool Sim7670G::sendSync(const String &command, uint32_t timeoutMs, String *outRe
   uint32_t drainStartMs = millis();
   while (commandInFlight && (millis() - drainStartMs < 2000))
   {
-    readUart();
+    pumpWait();
     checkTimeout();
     tick();
   }
@@ -1134,7 +1149,7 @@ bool Sim7670G::sendSync(const String &command, uint32_t timeoutMs, String *outRe
   uint32_t startMs = millis();
   while (syncWaiting && (millis() - startMs < timeoutMs))
   {
-    readUart();
+    pumpWait();
   }
 
   bool ok = false;
@@ -1262,7 +1277,7 @@ bool Sim7670G::ensureCaCert()
   bool gotPrompt = false;
   while (millis() - startMs < 5000)
   {
-    readUart();
+    pumpWait();
     if (!promptWaiting)
     {
       gotPrompt = !promptError;
@@ -1286,7 +1301,7 @@ bool Sim7670G::ensureCaCert()
   bool ok = false;
   while (millis() - startMs < 5000)
   {
-    readUart();
+    pumpWait();
     if (!syncWaiting)
     {
       ok = syncSuccess;
@@ -1391,7 +1406,7 @@ bool Sim7670G::openSocket(uint8_t linkId, const char *host, uint16_t port, bool 
   uint32_t startMs = millis();
   while (!socketOpenDone[linkId] && (millis() - startMs < timeoutMs))
   {
-    readUart();
+    pumpWait();
   }
 
   if (socketOpenDone[linkId] && socketOpenResult[linkId] == 0)
@@ -1456,7 +1471,7 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
     bool gotPrompt = false;
     while (millis() - startMs < timeoutMs)
     {
-      readUart();
+      pumpWait();
       if (!promptWaiting)
       {
         gotPrompt = !promptError;
@@ -1481,7 +1496,7 @@ size_t Sim7670G::sendSocketData(uint8_t linkId, const uint8_t *data, size_t len,
     syncResponseBuffer = "";
     while (millis() - startMs < timeoutMs)
     {
-      readUart();
+      pumpWait();
       if (!syncWaiting)
       {
         ok = syncSuccess;
@@ -1534,7 +1549,7 @@ int Sim7670G::readSocketData(uint8_t linkId, uint8_t *buf, size_t maxLen, bool s
   while (socketRxAvailable(linkId) == 0 && captureMode == false &&
          (millis() - startMs < timeoutMs))
   {
-    readUart();
+    pumpWait();
     if (socketRxAvailable(linkId) > 0)
     {
       break;
@@ -1543,7 +1558,7 @@ int Sim7670G::readSocketData(uint8_t linkId, uint8_t *buf, size_t maxLen, bool s
   // If a capture is mid-flight, let it finish filling the buffer.
   while (captureMode && captureLinkId == linkId && (millis() - startMs < timeoutMs))
   {
-    readUart();
+    pumpWait();
   }
 
   size_t n = socketRxDrain(linkId, buf, maxLen);
@@ -1631,7 +1646,7 @@ bool Sim7670G::resolveHost(const char *host, IPAddress &out)
   uint32_t startMs = millis();
   while (!dnsResolved && (millis() - startMs < 5000))
   {
-    readUart();
+    pumpWait();
   }
 
   if (dnsResolved)

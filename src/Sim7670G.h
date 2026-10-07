@@ -53,6 +53,12 @@ public:
   using UrcHandler = std::function<void(const String &line)>;
   // Called once each time INIT completes, i.e. when the modem is known to be alive.
   using ReadyCallback = std::function<void()>;
+  // Invoked repeatedly from inside the driver's blocking wait loops (sendSync,
+  // openSocket, sendSocketData, readSocketData). Lets the caller keep latency-
+  // sensitive work alive (GPS NMEA, serial console) and yield the CPU to
+  // FreeRTOS/ESP-IDF while a slow AT command is in flight, instead of freezing
+  // the whole cooperative main loop. Must NOT touch the modem UART itself.
+  using YieldHook = std::function<void()>;
 
   struct Info
   {
@@ -76,6 +82,7 @@ public:
   void setNmeaSink(NmeaSink sink) { nmeaSink = sink; }
   void setUrcHandler(UrcHandler handler) { urcHandler = handler; }
   void setReadyCallback(ReadyCallback callback) { readyCallback = callback; }
+  void setYieldHook(YieldHook hook) { yieldHook = hook; }
 
   static constexpr uint8_t kMaxSockets = 2; // link 0: HTTP/API, link 1: MQTT
 
@@ -119,6 +126,7 @@ private:
   NmeaSink nmeaSink;
   UrcHandler urcHandler;
   ReadyCallback readyCallback;
+  YieldHook yieldHook;
 
   std::deque<Command> queue;
   bool commandInFlight = false;
@@ -208,6 +216,9 @@ private:
   bool ensureCaCert();
 
   void readUart();
+  // One iteration of a blocking wait: pumps the UART and invokes the yield hook
+  // so the rest of the system keeps running while an AT command is in flight.
+  void pumpWait();
   void handleLine(const String &line);
   bool isFinalResult(const String &line, bool &ok) const;
   bool isUrc(const String &line) const;
