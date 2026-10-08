@@ -255,6 +255,16 @@ void BoardWaveshareSim7670g::initGPS()
   // the driver's ready callback runs this again once it answers.
   syslog->println("SIM7670G: enabling GNSS...");
   modem.send("AT+CGNSSPWR=1", 1000);
+  // Use all available constellations (GPS+GLONASS+BeiDou+Galileo). More birds in
+  // view is the most reliable way to cut time-to-first-fix; the default may be
+  // GPS-only. Value 15 = all four systems.
+  modem.send("AT+CGNSSMODE=15", 1000);
+  // Best-effort AGPS: downloads assist data over the PDP context to shorten a
+  // cold fix. NOTE: it needs the cellular data connection, so it is ineffective
+  // when data is gated off (modemHoldData=1 / policy 3). Field reports on this
+  // firmware show the benefit is modest-to-none, so this is a best-effort hint,
+  // not a guaranteed speed-up. Harmless if it returns ERROR.
+  modem.send("AT+CGNSSAGPS=1", 1000);
   modem.send("AT+CGNSSTST=1", 1000);
   modem.send("AT+CGNSSPORTSWITCH=0,1", 1000);
 }
