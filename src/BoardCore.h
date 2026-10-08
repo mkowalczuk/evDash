@@ -157,6 +157,10 @@ protected:
   void publishHaSensor(const char *component, const char *objectId, const char *name,
                        const char *deviceClass, const char *unit, const char *stateClass,
                        const char *entityCategory = nullptr, const char *payloadOn = nullptr, const char *payloadOff = nullptr);
+  // When non-null during publishHomeAssistantDiscovery(), publishHaSensor()
+  // appends a component entry to this object (device-based discovery, one
+  // retained message) instead of publishing one message per entity.
+  void *haComponentsAccumulator = nullptr;
   uint32_t wifiTransferredBytes = 0;
   uint32_t wifiTransferLastActivityMs = 0;
   uint32_t lastFirmwareVersionCheckMs = 0;

@@ -2388,16 +2388,10 @@ void BoardCore::publishHaSensor(const char *component, const char *objectId, con
                                    const char *deviceClass, const char *unit, const char *stateClass,
                                    const char *entityCategory, const char *payloadOn, const char *payloadOff)
 {
-  if (mqttClient == nullptr || !mqttClient->connected())
-  {
-    return;
-  }
-
   const char *rawTopic = liveData->settings.mqttPubTopic;
   const char *baseTopic = (strlen(rawTopic) > 0) ? rawTopic : "evdash";
   const char *rawId = (strlen(liveData->settings.mqttId) > 0) ? liveData->settings.mqttId :
                       ((strlen(rawTopic) > 0) ? rawTopic : "evdash");
-  const char *devName = (strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : rawId;
 
   char devId[64];
   size_t idx = 0;
@@ -2407,22 +2401,50 @@ void BoardCore::publishHaSensor(const char *component, const char *objectId, con
   }
   devId[idx] = '\0';
 
+  char uniqueId[96];
+  snprintf(uniqueId, sizeof(uniqueId), "%s_%s", devId, objectId);
+  char stateTopic[96];
+  snprintf(stateTopic, sizeof(stateTopic), "%s/%s", baseTopic, objectId);
+
+  // Device-based discovery path: append this entity as a component of the shared
+  // device message instead of publishing it on its own. The device block,
+  // availability and origin are written once by publishHomeAssistantDiscovery().
+  if (haComponentsAccumulator != nullptr)
+  {
+    JsonObject cmps = *static_cast<JsonObject *>(haComponentsAccumulator);
+    JsonObject c = cmps.createNestedObject(uniqueId);
+    c["p"] = component; // platform (sensor / binary_sensor)
+    c["name"] = name;
+    c["uniq_id"] = uniqueId;
+    c["object_id"] = uniqueId;
+    c["stat_t"] = stateTopic;
+    if (deviceClass && strlen(deviceClass) > 0) c["dev_cla"] = deviceClass;
+    if (unit && strlen(unit) > 0) c["unit_of_meas"] = unit;
+    if (stateClass && strlen(stateClass) > 0) c["stat_cla"] = stateClass;
+    if (entityCategory && strlen(entityCategory) > 0) c["ent_cat"] = entityCategory;
+    if (payloadOn) c["pl_on"] = payloadOn;
+    if (payloadOff) c["pl_off"] = payloadOff;
+    return;
+  }
+
+  // Legacy single-entity path (retained for callers outside discovery).
+  if (mqttClient == nullptr || !mqttClient->connected())
+  {
+    return;
+  }
+  const char *devName = (strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : rawId;
+
   char configTopic[128];
   snprintf(configTopic, sizeof(configTopic), "homeassistant/%s/%s/%s/config", component, devId, objectId);
 
   StaticJsonDocument<768> doc;
   doc["name"] = name;
-  char uniqueId[96];
-  snprintf(uniqueId, sizeof(uniqueId), "%s_%s", devId, objectId);
   doc["uniq_id"] = uniqueId;
   doc["object_id"] = uniqueId;
   char defaultEntityId[128];
   snprintf(defaultEntityId, sizeof(defaultEntityId), "%s.%s_%s", component, devId, objectId);
   doc["default_entity_id"] = defaultEntityId;
   doc["has_entity_name"] = true;
-
-  char stateTopic[96];
-  snprintf(stateTopic, sizeof(stateTopic), "%s/%s", baseTopic, objectId);
   doc["stat_t"] = stateTopic;
 
   if (deviceClass != nullptr && strlen(deviceClass) > 0)
@@ -2489,7 +2511,51 @@ void BoardCore::publishHomeAssistantDiscovery()
     return;
   }
 
-  syslog->info(DEBUG_NET, "Publishing Home Assistant MQTT discovery entities...");
+  syslog->info(DEBUG_NET, "Publishing Home Assistant MQTT discovery (device-based, single message)...");
+
+  const char *rawTopic = liveData->settings.mqttPubTopic;
+  const char *baseTopic = (strlen(rawTopic) > 0) ? rawTopic : "evdash";
+  const char *rawId = (strlen(liveData->settings.mqttId) > 0) ? liveData->settings.mqttId :
+                      ((strlen(rawTopic) > 0) ? rawTopic : "evdash");
+  const char *devName = (strlen(liveData->settings.haName) > 0) ? liveData->settings.haName : rawId;
+
+  char devId[64];
+  size_t idx = 0;
+  for (; rawId[idx] != '\0' && idx < sizeof(devId) - 1; idx++)
+  {
+    devId[idx] = (rawId[idx] == ' ' || rawId[idx] == '/') ? '_' : rawId[idx];
+  }
+  devId[idx] = '\0';
+
+  // One retained device-discovery message: homeassistant/device/<id>/config.
+  // Heap-backed (PSRAM when present) because the bundle of ~55 entities is far
+  // larger than the per-entity StaticJsonDocument.
+  HeapCapsJsonDocument doc(16384);
+
+  JsonObject dev = doc.createNestedObject("dev");
+  JsonArray ids = dev.createNestedArray("ids");
+  ids.add(devId);
+  dev["name"] = devName;
+  const char *rawModel = (strlen(liveData->settings.haModel) > 0) ? liveData->settings.haModel :
+                         ((strlen(rawTopic) > 0) ? rawTopic : hardwareModelName());
+  dev["mdl"] = rawModel;
+  dev["mf"] = "evDash";
+  const char *swVer = (APP_VERSION[0] == 'v') ? (APP_VERSION + 1) : APP_VERSION;
+  dev["sw"] = swVer;
+
+  JsonObject origin = doc.createNestedObject("o");
+  origin["name"] = "evDash";
+  origin["sw"] = swVer;
+
+  // Device-level availability shared by every component.
+  char availTopic[96];
+  snprintf(availTopic, sizeof(availTopic), "%s/status", baseTopic);
+  doc["avty_t"] = availTopic;
+  doc["pl_avail"] = "online";
+  doc["pl_not_avail"] = "offline";
+
+  JsonObject cmps = doc.createNestedObject("cmps");
+  haComponentsAccumulator = &cmps; // publishHaSensor now appends into cmps
 
   // Battery
   publishHaSensor("sensor", "soc", "Battery State of Charge", "battery", "%", "measurement");
@@ -2557,7 +2623,36 @@ void BoardCore::publishHomeAssistantDiscovery()
   publishHaSensor("sensor", "wifi_rssi", "WiFi Signal", "signal_strength", "dBm", "measurement", "diagnostic");
   publishHaSensor("sensor", "uptime", "Uptime", "duration", "s", "measurement", "diagnostic");
 
-  syslog->info(DEBUG_NET, "Home Assistant MQTT discovery published (retained).");
+  // Done accumulating; serialize and publish the single retained device message.
+  haComponentsAccumulator = nullptr;
+
+  char configTopic[128];
+  snprintf(configTopic, sizeof(configTopic), "homeassistant/device/%s/config", devId);
+
+  const size_t needed = measureJson(doc) + 1;
+  char *payload = static_cast<char *>(heap_caps_malloc(needed, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (payload == nullptr)
+  {
+    payload = static_cast<char *>(malloc(needed));
+  }
+  if (payload == nullptr)
+  {
+    syslog->info(DEBUG_NET, String("HA discovery: OOM building payload (") + needed + " bytes)");
+    return;
+  }
+  const size_t len = serializeJson(doc, payload, needed);
+
+  // The default PubSubClient buffer (768) is far too small; size it to fit.
+  const uint16_t prevBuffer = 768;
+  mqttClient->setBufferSize(static_cast<uint16_t>(len + 128));
+  const bool ok = mqttClient->publish(configTopic, reinterpret_cast<const uint8_t *>(payload),
+                                      static_cast<unsigned int>(len), true);
+  mqttClient->setBufferSize(prevBuffer); // restore for normal telemetry publishes
+  mqttClient->loop();
+  free(payload);
+
+  syslog->info(DEBUG_NET, String("HA discovery: published ") + len + " bytes in 1 message (" +
+                              (ok ? "OK" : "FAILED") + ")");
 }
 
 /**
