@@ -87,6 +87,10 @@ public:
   virtual void boardLoop() {}
   virtual void mainLoop();
   virtual void enterSleepMode(int secs) { (void)secs; }
+  // True when the board runs its own network failover (preferred/fallback link
+  // + SSID selection). When true, BoardCore's legacy WiFi SSID-cycling fallback
+  // is suppressed so the two do not fight over the WiFi connection.
+  virtual bool managesNetworkFailover() { return false; }
   void ntpSync() override;
   void syncRtcFromSystemTime() override;
   void showGps() override;

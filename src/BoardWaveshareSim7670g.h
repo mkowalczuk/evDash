@@ -3,6 +3,7 @@
 #include "BoardCore.h"
 #include "Sim7670G.h"
 #include "ModemTransport.h"
+#include "NetFailoverManager.h"
 #include <SD_MMC.h>
 #include <SPI.h>
 #include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
@@ -52,6 +53,7 @@ public:
   void modemReset() override;
   void modemTest() override;
   bool boardCanController() override { return true; }
+  bool managesNetworkFailover() override { return failoverActive; }
   void updateBatteryState() override;
   void batteryInfo() override;
   NetTransport *activeTransport() override;
@@ -62,6 +64,22 @@ private:
   // Opens the AT UART and hands it to the modem driver. The driver probes the
   // modem from the main loop, so boot does not wait for it to answer.
   void modemBegin();
+
+  // Preferred/fallback network failover for transport policies 0 and 1. The
+  // manager is reusable and board-agnostic; the board supplies ping/bring-up
+  // hooks. Policies 2 (cellular only) and 3 (WiFi only) are single-link and do
+  // not use it.
+  void setupFailover();
+  bool wifiPing(const char *host, uint32_t timeoutMs = 2000);
+  // Cellular reachability probe. Tries AT+CPING, and if that is unsupported or
+  // fails, falls back to a DNS resolve over the modem (AT+CDNSGIP) which is
+  // known to work on this firmware. Either success means the cellular data link
+  // is passing traffic.
+  bool modemReachable();
+  bool advanceWifiSsid();
+  void applyModemDataGate();
+  NetFailoverManager failover;
+  bool failoverActive = false;
 
   // The AT UART carries GNSS NMEA as well as command replies, so the driver
   // owns it and forwards the NMEA lines to the GPS parser. It is deliberately

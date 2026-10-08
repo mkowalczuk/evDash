@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 35
+#define SETTINGS_VERSION_CURRENT 36
 
 // BLE MAC address connection types
 #define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
@@ -497,6 +497,8 @@ typedef struct
   // == settings version 35
   uint8_t batteryPackType;         // 0 = Li-ion 18650 (3.7V nom), 1 = LiFePO4 (3.2V nom)
   uint8_t batteryUsbChargeEnabled; // 1 = charge only on USB, 0 = always charge
+  // == settings version 36
+  uint8_t modemHoldData;           // policy 0/1: 1 = hold cellular data (NETOPEN) until needed as fallback; 0 = keep data open (default). Modem+GNSS stay on either way.
   //
 } SETTINGS_STRUC;
 

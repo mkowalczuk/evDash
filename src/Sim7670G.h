@@ -93,6 +93,16 @@ public:
   bool isSocketConnected(uint8_t linkId) const { return (linkId < kMaxSockets) && socketConnected[linkId]; }
   bool isSocketDataPending(uint8_t linkId) const { return (linkId < kMaxSockets) && socketDataPending[linkId]; }
   bool resolveHost(const char *host, IPAddress &out);
+  // Lightweight connectivity check: ICMP ping via AT+CPING. Blocking (uses the
+  // yield hook), returns true if at least one echo reply came back. Only valid
+  // once dataReady(). Used by the failover manager to detect link up/down.
+  bool ping(const char *host, uint32_t timeoutMs = 8000);
+  // Gate the data connection (AT+NETOPEN). When disabled, the modem registers on
+  // the network but holds at REGISTERED without opening data, so cellular data is
+  // not used while another transport (WiFi) is the active one. Enabling it lets
+  // the state machine open data on the next tick. Default is enabled.
+  void setDataConnectionEnabled(bool enabled);
+  bool isDataConnectionEnabled() const { return dataConnectionEnabled; }
   bool sendSync(const String &command, uint32_t timeoutMs, String *outResponse = nullptr);
   // Time over cellular. ESP32 SNTP runs on the WiFi lwIP stack and cannot use
   // the modem, so the modem's own NTP client (AT+CNTP) / NITZ clock is used.
@@ -208,6 +218,15 @@ private:
   // DNS resolution state
   bool dnsResolved = false;
   IPAddress dnsResolvedIp;
+
+  // Data-connection gate (see setDataConnectionEnabled). Default true preserves
+  // the original behaviour of opening data as soon as registration succeeds.
+  bool dataConnectionEnabled = true;
+
+  // ICMP ping (AT+CPING) state. pingPending is true while a ping() call awaits
+  // its result; pingReplied is set by the +CPING URC when an echo returns.
+  bool pingPending = false;
+  bool pingReplied = false;
 
   // TLS server-authentication (authmode 1) requires a CA certificate in the
   // modem's store. Uploaded lazily on first secure connect; the modem keeps it

@@ -329,6 +329,8 @@ void BoardInterface::loadSettings()
   // v35
   liveData->settings.batteryPackType = 0;
   liveData->settings.batteryUsbChargeEnabled = 1;
+  // v36
+  liveData->settings.modemHoldData = 0; // default: keep cellular data open (fast failover)
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -599,9 +601,14 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 34)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 35;
         liveData->tmpSettings.batteryPackType = 0;
         liveData->tmpSettings.batteryUsbChargeEnabled = 1;
+      }
+      if (liveData->tmpSettings.settingsVersion == 35)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.modemHoldData = 0;
       }
 
       // Save upgraded structure
@@ -2756,7 +2763,8 @@ bool BoardInterface::customConsoleCommand(String cmd)
       flagSetting("modemMqttEnabled", liveData->settings.modemMqttEnabled) ||
       flagSetting("modemRoaming", liveData->settings.modemRoaming) ||
       flagSetting("modemTlsInsecure", liveData->settings.modemTlsInsecure) ||
-      flagSetting("modemDataSaver", liveData->settings.modemDataSaver))
+      flagSetting("modemDataSaver", liveData->settings.modemDataSaver) ||
+      flagSetting("modemHoldData", liveData->settings.modemHoldData))
   {
     return true;
   }
@@ -3330,6 +3338,7 @@ void BoardInterface::showHelp()
   syslog->println("  modemRoaming[=0|1]    ... get/set cellular roaming allowance");
   syslog->println("  modemPolicy[=0..3]    ... get/set transport policy (0=WiFi, 1=Cell, 2=Cell-only, 3=WiFi-only)");
   syslog->println("  modemDataSaver[=0|1]  ... get/set reduced cellular data usage");
+  syslog->println("  modemHoldData[=0|1]   ... policy 0/1: 1=hold cellular data until needed as fallback (GPS stays on), 0=keep open");
   syslog->println("  modemTlsInsecure[=0|1]... get/set skip TLS cert check on modem sockets");
   syslog->println("  modemNetworkMode[=0|1|2] ... get/set network mode (0 auto, 1 LTE, 2 GSM)");
   syslog->println("  modemHttpEnabled[=0|1], modemMqttEnabled[=0|1] ... allow HTTP / MQTT over modem");

@@ -17,7 +17,7 @@ static const char *const kCaCertName = "isrgrootx1.pem";
 // so they have to be recognised by prefix and kept out of the response buffer.
 static const char *const kUrcPrefixes[] = {
     "+CIPRX", "+CMQTTRX", "+CGNSSINFO", "+CGEV", "+NETOPEN", "+CIPEVENT", "+CMQTTCONNLOST",
-    "+CIPOPEN", "+CCHOPEN", "+CCHCLOSE", "+CIPCLOSE", "+CDNSGIP", "+CCHRECV", "RDY", "PB DONE"};
+    "+CIPOPEN", "+CCHOPEN", "+CCHCLOSE", "+CCH_PEER_CLOSED", "+CIPCLOSE", "+CDNSGIP", "+CCHRECV", "+CPING", "RDY", "PB DONE"};
 
 void Sim7670G::begin(HardwareSerial *serial, LiveData *data)
 {
@@ -88,6 +88,8 @@ void Sim7670G::reset()
   rawRxReceived = 0;
   dnsResolved = false;
   caCertUploaded = false;
+  pingPending = false;
+  pingReplied = false;
 }
 
 bool Sim7670G::send(const String &command, uint32_t timeoutMs, ResponseCallback callback)
@@ -451,6 +453,17 @@ void Sim7670G::handleUrc(const String &line)
       socketConnected[linkId] = false;
     }
   }
+  else if (line.startsWith("+CCH_PEER_CLOSED:"))
+  {
+    // The remote peer (e.g. the MQTT broker) closed the TLS connection. Mark the
+    // socket down so the client stops writing into a dead link and reconnects.
+    int linkId = line.substring(line.indexOf(':') + 1).toInt();
+    if (linkId >= 0 && linkId < kMaxSockets)
+    {
+      socketConnected[linkId] = false;
+      socketDataPending[linkId] = false;
+    }
+  }
   else if (line.startsWith("+CCHCLOSE:"))
   {
     int linkId = line.substring(10).toInt();
@@ -504,6 +517,21 @@ void Sim7670G::handleUrc(const String &line)
     if (linkId >= 0 && linkId < kMaxSockets)
     {
       socketDataPending[linkId] = true;
+    }
+  }
+  else if (line.startsWith("+CPING:"))
+  {
+    // +CPING: 1,<ip>,<size>,<rtt>,<ttl>  -> echo reply (success)
+    // +CPING: 2                           -> request timed out
+    // +CPING: 3,<sent>,<rcvd>,...         -> summary
+    if (pingPending)
+    {
+      String rest = line.substring(line.indexOf(':') + 1);
+      rest.trim();
+      if (rest.startsWith("1,") || rest == "1")
+      {
+        pingReplied = true;
+      }
     }
   }
   else if (line.startsWith("+CDNSGIP: 1,"))
@@ -891,6 +919,17 @@ void Sim7670G::stepRegistered()
     {
       nextActionMs = millis() + 500;
     }
+    return;
+  }
+
+  // Data-connection gate. When disabled, hold at REGISTERED without opening data
+  // (AT+NETOPEN). The modem stays powered and registered and, crucially, the
+  // GNSS session (AT+CGNSSPWR/CGNSSTST) and its NMEA stream keep running on the
+  // shared AT UART - only the cellular DATA path is withheld. This lets another
+  // transport (WiFi) be the active uploader while GPS continues to work.
+  if (!dataConnectionEnabled)
+  {
+    nextActionMs = millis() + kStatusPollMs;
     return;
   }
 
@@ -1655,6 +1694,72 @@ bool Sim7670G::resolveHost(const char *host, IPAddress &out)
     return true;
   }
   return false;
+}
+
+void Sim7670G::setDataConnectionEnabled(bool enabled)
+{
+  if (dataConnectionEnabled == enabled)
+  {
+    return;
+  }
+  dataConnectionEnabled = enabled;
+  // Re-opening is handled by the state machine on the next tick when enabled.
+  // Disabling does not tear down an already-open connection (that would disturb
+  // nothing GNSS-related, but leaving it open allows instant failback); it only
+  // prevents a future AT+NETOPEN.
+  if (enabled)
+  {
+    nextActionMs = 0; // allow the data step to run immediately
+  }
+}
+
+/**
+ * ICMP ping via AT+CPING. Blocking; relies on the yield hook to keep the rest of
+ * the system alive. Returns true if at least one echo reply is received.
+ *
+ * Response shapes (A76XX):
+ *   +CPING: 1,<ip>,<size>,<rtt>,<ttl>   -> a reply (result type 1)
+ *   +CPING: 2                            -> timeout
+ *   +CPING: 3,<sent>,<rcvd>,<lost>,...   -> summary
+ * We treat the presence of a type-1 line as success.
+ */
+bool Sim7670G::ping(const char *host, uint32_t timeoutMs)
+{
+  if (currentState != STATE_NET_OPEN || host == nullptr || host[0] == '\0')
+  {
+    return false;
+  }
+
+  // AT+CPING=<host>,<ip_type>,<count>,<size>,<interval_ms>,<wait_ms>,<ttl>.
+  // The command returns OK quickly; the actual echo result arrives later as a
+  // "+CPING: 1,..." URC, captured in handleUrc() which sets pingReplied.
+  // Parameters mirror the known-good SIMCom A76XX form: 1 echo, 64-byte packet,
+  // 1000 ms interval, 10000 ms per-reply wait, ttl 255. All values are within
+  // the ranges the SIM767XX AT manual defines for AT+CPING (num_pings 1-5,
+  // size 4-188, interval 1000-10000 ms, wait 10000-100000 ms, ttl 16-255).
+  // NOTE: an earlier version passed wait=~80 ms, below the 10000 ms floor, which
+  // the firmware rejected with ERROR. The command acks with OK quickly (manual:
+  // max response 5000 ms); the echo result follows as a +CPING URC.
+  pingReplied = false;
+  pingPending = true;
+  String cmd = String("AT+CPING=\"") + host + "\",1,1,64,1000,10000,255";
+  if (!sendSync(cmd, 5000))
+  {
+    pingPending = false;
+    syslog->info(DEBUG_NET, String("NET: ping ") + host + " failed (command error)");
+    return false;
+  }
+
+  uint32_t startMs = millis();
+  while (!pingReplied && (millis() - startMs < timeoutMs))
+  {
+    pumpWait();
+  }
+  pingPending = false;
+
+  const bool ok = pingReplied;
+  syslog->info(DEBUG_NET, String("NET: ping ") + host + (ok ? " OK (reply)" : " FAILED (no reply)"));
+  return ok;
 }
 
 #endif // BOARD_WAVESHARE_SIM7670G

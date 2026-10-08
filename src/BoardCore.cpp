@@ -185,6 +185,7 @@ void BoardCore::mainLoop()
                                   !liveData->params.wifiApMode &&
                                   wifiEnabled &&
                                   isWifiActive &&
+                                  !managesNetworkFailover() &&
                                   liveData->settings.remoteUploadModuleType == REMOTE_UPLOAD_WIFI);
   if (allowWifiFallback)
   {
