@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 36
+#define SETTINGS_VERSION_CURRENT 37
 
 // BLE MAC address connection types
 #define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
@@ -153,6 +153,10 @@ typedef struct
   time_t lastAbrpSent;
   time_t lastContributeSent;
   time_t lastSuccessNetSendTime;
+  // Set when an MQTT/ABRP/API upload fails with a server/transport error
+  // (e.g. auth rejected, bad token, HTTP error, MQTT connect refused); cleared
+  // on the next successful send. Drives the status LED's error colour.
+  time_t lastUploadErrorTime;
   bool netAvailable;
   time_t netLastFailureTime;
   time_t netFailureStartTime;
@@ -499,6 +503,9 @@ typedef struct
   uint8_t batteryUsbChargeEnabled; // 1 = charge only on USB, 0 = always charge
   // == settings version 36
   uint8_t modemHoldData;           // policy 0/1: 1 = hold cellular data (NETOPEN) until needed as fallback; 0 = keep data open (default). Modem+GNSS stay on either way.
+  // == settings version 37
+  uint8_t statusLedEnabled;        // 0 - off, 1 - on (onboard WS2812B status LED)
+  uint8_t statusLedBrightness;     // 0..100 % (0 = off)
   //
 } SETTINGS_STRUC;
 

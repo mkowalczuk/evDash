@@ -187,6 +187,7 @@ build_flags =
 lib_deps =
 	h2zero/NimBLE-Arduino@^1.4.3
 	sparkfun/SparkFun MAX1704x Fuel Gauge Arduino Library@^1.0.4
+	adafruit/Adafruit NeoPixel@^1.12.3
 	${common.lib_deps}
 ; This board has the SIM7670G modem (and later the onboard WS2812B) and no M5
 ; display, so use the Waveshare filter (includes the modem/LED files, excludes

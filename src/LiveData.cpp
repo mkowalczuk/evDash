@@ -34,6 +34,7 @@ void LiveData::initParams()
   params.lastAbrpSent = 0;
   params.lastContributeSent = 0;
   params.lastSuccessNetSendTime = 0;
+  params.lastUploadErrorTime = 0;
   params.netAvailable = true;
   params.netLastFailureTime = 0;
   params.netFailureStartTime = 0;

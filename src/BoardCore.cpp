@@ -2986,6 +2986,7 @@ bool BoardCore::netSendData(bool sendAbrp)
     {
       syslog->info(DEBUG_NET, (liveData->settings.mqttEnabled == 1) ? "MQTT send successful" : "HTTP POST send successful");
       liveData->params.lastSuccessNetSendTime = liveData->params.currentTime;
+      liveData->params.lastUploadErrorTime = 0; // clear error on success
       updateNetAvailability(true);
     }
     else
@@ -2993,6 +2994,7 @@ bool BoardCore::netSendData(bool sendAbrp)
       // Failed...
       syslog->infoNolf(DEBUG_NET, (liveData->settings.mqttEnabled == 1) ? "MQTT send error: " : "HTTP POST error: ");
       syslog->info(DEBUG_NET, rc);
+      liveData->params.lastUploadErrorTime = liveData->params.currentTime;
       updateNetAvailability(false);
     }
   }
@@ -3157,6 +3159,7 @@ bool BoardCore::netSendData(bool sendAbrp)
     {
       syslog->info(DEBUG_ABRP, "HTTP POST send successful");
       liveData->params.lastSuccessNetSendTime = liveData->params.currentTime;
+      liveData->params.lastUploadErrorTime = 0; // clear error on success
       updateNetAvailability(true);
     }
     else
@@ -3164,6 +3167,7 @@ bool BoardCore::netSendData(bool sendAbrp)
       // Failed...
       syslog->infoNolf(DEBUG_ABRP, "HTTP POST error: ");
       syslog->info(DEBUG_ABRP, rc);
+      liveData->params.lastUploadErrorTime = liveData->params.currentTime;
       updateNetAvailability(false);
     }
   }

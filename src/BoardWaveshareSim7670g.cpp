@@ -27,6 +27,16 @@ void BoardWaveshareSim7670g::initBoard()
 
   modemBegin();
 
+  if (liveData->settings.statusLedEnabled == 1)
+  {
+    statusLed.begin(WS2812B_PIN,
+                    static_cast<uint8_t>((uint16_t)liveData->settings.statusLedBrightness * 255 / 100));
+  }
+  else
+  {
+    statusLed.setEnabled(false);
+  }
+
   if (liveData->settings.voltmeterEnabled == 1)
   {
     Wire.begin(BAT_SDA_PIN, BAT_SCL_PIN);
@@ -241,6 +251,35 @@ void BoardWaveshareSim7670g::boardLoop()
     gpsFed = false;
     syncGPS();
   }
+
+  updateStatusLed();
+}
+
+void BoardWaveshareSim7670g::updateStatusLed()
+{
+  // Push live settings each frame so console changes to statusLedEnabled /
+  // statusLedBrightness take effect immediately (no reboot needed).
+  statusLed.setEnabled(liveData->settings.statusLedEnabled == 1);
+  statusLed.setBrightness(
+      static_cast<uint8_t>((uint16_t)liveData->settings.statusLedBrightness * 255 / 100));
+
+  const bool wifiUp = (WiFi.status() == WL_CONNECTED);
+  const bool modemDataUp = modem.dataReady();
+  const bool anyNet = wifiUp || modemDataUp;
+
+  // An upload error counts while it is recent and no later success has cleared
+  // it (lastUploadErrorTime is reset to 0 on the next successful send).
+  const bool uploadError =
+      (liveData->params.lastUploadErrorTime != 0 &&
+       liveData->params.currentTime - liveData->params.lastUploadErrorTime <= 30);
+
+  StatusLed::DeviceStatus s;
+  s.netConnected = anyNet;                           // green
+  s.commConnecting = !liveData->commConnected;       // blue: car link not up / retrying
+  s.error = (!anyNet) || uploadError;                // red: offline or upload/auth error
+  s.noGpsFix = !isGpsFixUsable(liveData);            // yellow: no GPS fix
+
+  statusLed.update(s);
 }
 
 void BoardWaveshareSim7670g::initGPS()

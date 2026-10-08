@@ -331,6 +331,9 @@ void BoardInterface::loadSettings()
   liveData->settings.batteryUsbChargeEnabled = 1;
   // v36
   liveData->settings.modemHoldData = 0; // default: keep cellular data open (fast failover)
+  // v37
+  liveData->settings.statusLedEnabled = 1;
+  liveData->settings.statusLedBrightness = 20;
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -607,8 +610,14 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 35)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 36;
         liveData->tmpSettings.modemHoldData = 0;
+      }
+      if (liveData->tmpSettings.settingsVersion == 36)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.statusLedEnabled = 1;
+        liveData->tmpSettings.statusLedBrightness = 20;
       }
 
       // Save upgraded structure
@@ -2764,8 +2773,18 @@ bool BoardInterface::customConsoleCommand(String cmd)
       flagSetting("modemRoaming", liveData->settings.modemRoaming) ||
       flagSetting("modemTlsInsecure", liveData->settings.modemTlsInsecure) ||
       flagSetting("modemDataSaver", liveData->settings.modemDataSaver) ||
-      flagSetting("modemHoldData", liveData->settings.modemHoldData))
+      flagSetting("modemHoldData", liveData->settings.modemHoldData) ||
+      flagSetting("statusLedEnabled", liveData->settings.statusLedEnabled))
   {
+    return true;
+  }
+  if (numberSetting("statusLedBrightness", liveData->settings.statusLedBrightness, 0, 100))
+  {
+    if (accepted)
+    {
+      liveData->settings.statusLedBrightness = static_cast<uint8_t>(newNumber);
+      saveSettings();
+    }
     return true;
   }
   if (numberSetting("modemNetworkMode", liveData->settings.modemNetworkMode, 0, 2))
@@ -3340,6 +3359,8 @@ void BoardInterface::showHelp()
   syslog->println("  modemDataSaver[=0|1]  ... get/set reduced cellular data usage");
   syslog->println("  modemHoldData[=0|1]   ... policy 0/1: 1=hold cellular data until needed as fallback (GPS stays on), 0=keep open");
   syslog->println("  modemTlsInsecure[=0|1]... get/set skip TLS cert check on modem sockets");
+  syslog->println("  statusLedEnabled[=0|1]... get/set onboard RGB status LED");
+  syslog->println("  statusLedBrightness[=0..100] ... get/set status LED brightness %");
   syslog->println("  modemNetworkMode[=0|1|2] ... get/set network mode (0 auto, 1 LTE, 2 GSM)");
   syslog->println("  modemHttpEnabled[=0|1], modemMqttEnabled[=0|1] ... allow HTTP / MQTT over modem");
   syslog->println("  modemSocketTimeoutMs[=ms], modemRetryBackoffSec[=sec] ... modem timing");

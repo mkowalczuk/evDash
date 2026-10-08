@@ -4,6 +4,7 @@
 #include "Sim7670G.h"
 #include "ModemTransport.h"
 #include "NetFailoverManager.h"
+#include "StatusLed.h"
 #include <SD_MMC.h>
 #include <SPI.h>
 #include <SparkFun_MAX1704x_Fuel_Gauge_Arduino_Library.h>
@@ -80,6 +81,11 @@ private:
   void applyModemDataGate();
   NetFailoverManager failover;
   bool failoverActive = false;
+
+  // Onboard WS2812B status LED. Reflects the highest-priority device concern
+  // (comm / network / uplink) via colour, with a non-blocking activity pulse.
+  void updateStatusLed();
+  StatusLed statusLed;
 
   // The AT UART carries GNSS NMEA as well as command replies, so the driver
   // owns it and forwards the NMEA lines to the GPS parser. It is deliberately
