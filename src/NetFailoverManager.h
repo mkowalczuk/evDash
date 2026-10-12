@@ -69,6 +69,7 @@ public:
     hooks = h;
     active = Link::Preferred;
     consecutiveFailures = 0;
+    l2DownRotations = 0;
     lastProbeMs = 0;
     recheckBackoffMs = cfg.fallbackRecheckStartMs;
     pendingPreferredConfirm = false;
@@ -97,6 +98,14 @@ private:
   bool started = false;
   Link active = Link::Preferred;
   uint8_t consecutiveFailures = 0;
+  // How long a freshly-selected preferred option (e.g. a WiFi SSID) is given to
+  // associate before the L2-down path rotates again or fails over. Short enough
+  // that cellular failover is seconds, not the connected-link probe interval.
+  static constexpr uint32_t kL2AssociateWaitMs = 5000;
+  // Max preferred-option rotations while link-down before failing over, so a set
+  // of all-absent SSIDs cannot spin on the L2-down path indefinitely.
+  static constexpr uint8_t kMaxL2DownRotations = 4;
+  uint8_t l2DownRotations = 0;
   uint32_t lastProbeMs = 0;
   uint32_t recheckBackoffMs = 60000;
   // True after switching back to preferred, until a confirming probe passes.

@@ -5,8 +5,13 @@
  * so the actual (blocking) probe runs at most once per interval.
  *
  * On the PREFERRED link:
- *   - probe every probeIntervalMs; on failureThreshold consecutive failures,
- *     switch to the fallback (bringing it up first) and start the recheck timer.
+ *   - if the link is down at L2 (preferredReady false, e.g. WiFi not
+ *     associated), fail over immediately: try rotating to another preferred
+ *     option (e.g. next WiFi SSID) first, otherwise switch to the fallback at
+ *     once without waiting a probe interval or a second failure.
+ *   - if the link is up, probe every probeIntervalMs; on failureThreshold
+ *     consecutive probe failures, switch to the fallback (bringing it up first)
+ *     and start the recheck timer.
  *
  * On the FALLBACK link:
  *   - periodically (recheck backoff, growing to the cap) re-probe the PREFERRED
@@ -26,15 +31,53 @@ void NetFailoverManager::loop()
 
   if (active == Link::Preferred)
   {
+    // Link-layer down (e.g. WiFi not associated / no AP found) is immediate and
+    // definitive: there is nothing to ping and waiting a full probe interval or
+    // a second failure just strands us without connectivity. Fail over at once,
+    // bypassing both the probe throttle and the failure-count threshold. The
+    // probe/threshold machinery below is only for damping a *connected* link
+    // that drops the occasional packet.
+    if (!call(hooks.preferredReady, true))
+    {
+      // Throttle this path so a freshly-selected SSID gets a few seconds to
+      // associate before we judge it down and rotate again. Much shorter than
+      // probeIntervalMs (which paces a *connected* link's reachability probe),
+      // so failover to cellular still completes in seconds, not a minute.
+      if ((now - lastProbeMs) < kL2AssociateWaitMs)
+      {
+        return;
+      }
+      lastProbeMs = now;
+
+      // Let a multi-option preferred link (e.g. several WiFi SSIDs) try its next
+      // option first; if that associates, we stay on preferred and re-probe.
+      // Bound the rotation so a set of all-absent SSIDs can't spin here forever:
+      // after a full sweep's worth of attempts we fail over regardless.
+      if (l2DownRotations < kMaxL2DownRotations && call(hooks.onPreferredRetry, false))
+      {
+        l2DownRotations++;
+        consecutiveFailures = 0;
+        return;
+      }
+      logMsg("NET: preferred link not associated, switching to fallback immediately");
+      call(hooks.bringUpFallback);
+      active = Link::Fallback;
+      consecutiveFailures = 0;
+      l2DownRotations = 0;
+      recheckBackoffMs = config.fallbackRecheckStartMs;
+      lastProbeMs = now;
+      return;
+    }
+    l2DownRotations = 0;
+
     if ((now - lastProbeMs) < config.probeIntervalMs)
     {
       return;
     }
     lastProbeMs = now;
 
-    // If the preferred link isn't even up at link layer, treat as a failure.
-    const bool linkUp = call(hooks.preferredReady, true);
-    const bool ok = linkUp && call(hooks.probePreferred, false);
+    // Link is up at L2; judge reachability by the connectivity probe.
+    const bool ok = call(hooks.probePreferred, false);
     if (ok)
     {
       consecutiveFailures = 0;
