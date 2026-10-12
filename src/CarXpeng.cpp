@@ -5,6 +5,7 @@
 #include <sys/time.h>
 #include "LiveData.h"
 #include "CarXpeng.h"
+#include "HaTopics.h"
 #include <vector>
 
 namespace
@@ -76,15 +77,15 @@ namespace
 bool CarXpeng::supportsHaTelemetry(const char *objectId)
 {
   static const char *const unsupported[] = {
-      "inverter_temp",      // DID 220325 is slow-charge temp 2, not inverter temp
-      "aux_current",        // auxCurrentAmp never parsed
-      "consumption",        // batPowerKwh100 never parsed
-      "avg_speed",          // avgSpeedKmh never computed (would publish 0)
-      "outdoor_temp",       // outdoorTemperature never parsed (would publish -100)
-      "tire_pressure_fl",   // TPMS not read on Xpeng
-      "tire_pressure_fr",
-      "tire_pressure_rl",
-      "tire_pressure_rr",
+      ha::INVERTER_TEMP,  // DID 220325 is slow-charge temp 2, not inverter temp
+      ha::AUX_CURRENT,    // auxCurrentAmp never parsed
+      ha::CONSUMPTION,    // batPowerKwh100 never parsed
+      ha::AVG_SPEED,      // avgSpeedKmh never computed (would publish 0)
+      ha::OUTDOOR_TEMP,   // outdoorTemperature never parsed (would publish -100)
+      ha::TIRE_PRESSURE_FL, // TPMS not read on Xpeng
+      ha::TIRE_PRESSURE_FR,
+      ha::TIRE_PRESSURE_RL,
+      ha::TIRE_PRESSURE_RR,
   };
   for (const char *u : unsupported)
   {

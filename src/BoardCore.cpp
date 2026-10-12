@@ -3,6 +3,7 @@
 #include "config.h"
 #include "CarModelUtils.h"
 #include "BoardShared.h"
+#include "HaTopics.h"
 
 static String getTraccarDeviceIdFromEfuse();
 
@@ -2606,70 +2607,70 @@ void BoardCore::publishHomeAssistantDiscovery()
   haComponentsAccumulator = &cmps; // publishHaSensor now appends into cmps
 
   // Battery
-  publishHaSensor("sensor", "soc", "Battery State of Charge", "battery", "%", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "soc_kwh", "Battery SoC in kWh", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "soh", "Battery State of Health", "battery", "%", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "bat_power", "Battery Power", "power", "kW", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "bat_current", "Battery Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "bat_voltage", "Battery Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "bat_temp", "Battery Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "cell_temp_min", "Cell Temperature Min", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "cell_temp_max", "Cell Temperature Max", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "cell_voltage_min", "Cell Voltage Min", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "cell_voltage_max", "Cell Voltage Max", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::SOC, "Battery State of Charge", "battery", "%", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::SOC_KWH, "Battery SoC in kWh", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::SOH, "Battery State of Health", "battery", "%", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::BAT_POWER, "Battery Power", "power", "kW", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::BAT_CURRENT, "Battery Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::BAT_VOLTAGE, "Battery Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::BAT_TEMP, "Battery Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CELL_TEMP_MIN, "Cell Temperature Min", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CELL_TEMP_MAX, "Cell Temperature Max", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CELL_VOLTAGE_MIN, "Cell Voltage Min", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CELL_VOLTAGE_MAX, "Cell Voltage Max", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // 12V Aux
-  publishHaSensor("sensor", "aux_voltage", "Aux 12V Battery Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "aux_current", "Aux 12V Battery Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "aux_soc", "Aux 12V State of Charge", "battery", "%", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::AUX_VOLTAGE, "Aux 12V Battery Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::AUX_CURRENT, "Aux 12V Battery Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::AUX_SOC, "Aux 12V State of Charge", "battery", "%", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // Charging
-  publishHaSensor("binary_sensor", "charging_on", "Charging", "battery_charging", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
-  publishHaSensor("binary_sensor", "charger_ac_connected", "Charger AC Connected", "plug", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
-  publishHaSensor("binary_sensor", "charger_dc_connected", "Charger DC Fast Charging", "plug", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
-  publishHaSensor("sensor", "charger_power", "Station Power", "power", "kW", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "charger_voltage", "Station Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "charger_current", "Station Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "charged_session_energy", "Charging Session Energy", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "cumulative_energy_charged", "Total Charged Energy", "energy", "kWh", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("binary_sensor", ha::CHARGING_ON, "Charging", "battery_charging", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("binary_sensor", ha::CHARGER_AC_CONNECTED, "Charger AC Connected", "plug", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("binary_sensor", ha::CHARGER_DC_CONNECTED, "Charger DC Fast Charging", "plug", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("sensor", ha::CHARGER_POWER, "Station Power", "power", "kW", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CHARGER_VOLTAGE, "Station Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CHARGER_CURRENT, "Station Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CHARGED_SESSION_ENERGY, "Charging Session Energy", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CUMULATIVE_ENERGY_CHARGED, "Total Charged Energy", "energy", "kWh", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
 
   // Driving & Drivetrain
-  publishHaSensor("binary_sensor", "ignition_on", "Ignition", "power", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
-  publishHaSensor("sensor", "speed", "Vehicle Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "odometer", "Odometer", "distance", "km", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "trip_distance", "Trip Distance", "distance", "km", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "avg_speed", "Average Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "consumption", "Energy Consumption", nullptr, "kWh/100km", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "discharged_session_energy", "Trip Discharged Energy", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "cumulative_energy_discharged", "Total Discharged Energy", "energy", "kWh", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "motor1_rpm", "Motor 1 RPM", nullptr, "rpm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "motor2_rpm", "Motor 2 RPM", nullptr, "rpm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "motor1_torque", "Motor 1 Torque", nullptr, "Nm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "motor2_torque", "Motor 2 Torque", nullptr, "Nm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "motor_temp", "Motor Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "inverter_temp", "Inverter Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("binary_sensor", ha::IGNITION_ON, "Ignition", "power", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("sensor", ha::SPEED, "Vehicle Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::ODOMETER, "Odometer", "distance", "km", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::TRIP_DISTANCE, "Trip Distance", "distance", "km", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::AVG_SPEED, "Average Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CONSUMPTION, "Energy Consumption", nullptr, "kWh/100km", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::DISCHARGED_SESSION_ENERGY, "Trip Discharged Energy", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::CUMULATIVE_ENERGY_DISCHARGED, "Total Discharged Energy", "energy", "kWh", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::MOTOR1_RPM, "Motor 1 RPM", nullptr, "rpm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::MOTOR2_RPM, "Motor 2 RPM", nullptr, "rpm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::MOTOR1_TORQUE, "Motor 1 Torque", nullptr, "Nm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::MOTOR2_TORQUE, "Motor 2 Torque", nullptr, "Nm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::MOTOR_TEMP, "Motor Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::INVERTER_TEMP, "Inverter Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // Tires
-  publishHaSensor("sensor", "tire_pressure_fl", "Tire Pressure Front Left", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "tire_pressure_fr", "Tire Pressure Front Right", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "tire_pressure_rl", "Tire Pressure Rear Left", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
-  publishHaSensor("sensor", "tire_pressure_rr", "Tire Pressure Rear Right", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::TIRE_PRESSURE_FL, "Tire Pressure Front Left", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::TIRE_PRESSURE_FR, "Tire Pressure Front Right", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::TIRE_PRESSURE_RL, "Tire Pressure Rear Left", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", ha::TIRE_PRESSURE_RR, "Tire Pressure Rear Right", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
 
   // Environment
-  publishHaSensor("sensor", "outdoor_temp", "Outdoor Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::OUTDOOR_TEMP, "Outdoor Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // GPS
-  publishHaSensor("sensor", "gps_lat", "GPS Latitude", nullptr, "°", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "gps_lon", "GPS Longitude", nullptr, "°", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "gps_speed", "GPS Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "gps_alt", "GPS Altitude", "distance", "m", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
-  publishHaSensor("sensor", "gps_heading", "GPS Heading", nullptr, "°", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::GPS_LAT, "GPS Latitude", nullptr, "°", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::GPS_LON, "GPS Longitude", nullptr, "°", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::GPS_SPEED, "GPS Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::GPS_ALT, "GPS Altitude", "distance", "m", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", ha::GPS_HEADING, "GPS Heading", nullptr, "°", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // Diagnostics
-  publishHaSensor("sensor", "status", "Device Status", nullptr, nullptr, nullptr, "diagnostic");
-  publishHaSensor("binary_sensor", "car_connected", "Car Connected", "connectivity", nullptr, nullptr, "diagnostic", "1", "0");
-  publishHaSensor("sensor", "wifi_rssi", "WiFi Signal", "signal_strength", "dBm", "measurement", "diagnostic");
-  publishHaSensor("sensor", "uptime", "Uptime", "duration", "s", "measurement", "diagnostic");
+  publishHaSensor("sensor", ha::STATUS, "Device Status", nullptr, nullptr, nullptr, "diagnostic");
+  publishHaSensor("binary_sensor", ha::CAR_CONNECTED, "Car Connected", "connectivity", nullptr, nullptr, "diagnostic", "1", "0");
+  publishHaSensor("sensor", ha::WIFI_RSSI, "WiFi Signal", "signal_strength", "dBm", "measurement", "diagnostic");
+  publishHaSensor("sensor", ha::UPTIME, "Uptime", "duration", "s", "measurement", "diagnostic");
 
   // Done accumulating; serialize and publish the single retained device message.
   haComponentsAccumulator = nullptr;
@@ -2843,49 +2844,53 @@ bool BoardCore::netSendData(bool sendAbrp)
             // suffix's leading '/' is skipped to get the object_id. GPS and
             // heartbeat publishes stay direct — they are not car telemetry.
             CarInterface *car = carInterface;
-            auto carPublishes = [car](const char *suffix) {
-              return car == nullptr || car->supportsHaTelemetry(suffix + 1);
+            auto carPublishes = [car](const char *objectId) {
+              return car == nullptr || car->supportsHaTelemetry(objectId);
             };
-            auto pubF = [&](const char *suffix, float value, uint8_t precision = 2, bool retain = false) {
-              if (!carPublishes(suffix)) return;
+            auto pubF = [&](const char *objectId, float value, uint8_t precision = 2, bool retain = false) {
+              if (!carPublishes(objectId)) return;
+              char suffix[48];
+              snprintf(suffix, sizeof(suffix), "/%s", objectId);
               published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, suffix, value, precision, retain);
             };
-            auto pubI = [&](const char *suffix, int32_t value) {
-              if (!carPublishes(suffix)) return;
+            auto pubI = [&](const char *objectId, int32_t value) {
+              if (!carPublishes(objectId)) return;
+              char suffix[48];
+              snprintf(suffix, sizeof(suffix), "/%s", objectId);
               published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, suffix, value);
             };
 
-            pubF("/soc", liveData->params.socPerc, 2, true);
-            pubI("/charging_on", liveData->params.chargingOn ? 1 : 0);
-            pubI("/ignition_on", liveData->params.ignitionOn ? 1 : 0);
-            pubI("/charger_ac_connected", liveData->params.chargerACconnected ? 1 : 0);
-            pubI("/charger_dc_connected", liveData->params.chargerDCconnected ? 1 : 0);
-            pubF("/bat_power", liveData->params.batPowerKw);
-            pubF("/bat_current", liveData->params.batPowerAmp);
-            pubF("/bat_voltage", liveData->params.batVoltage);
-            pubF("/aux_voltage", liveData->params.auxVoltage);
+            pubF(ha::SOC, liveData->params.socPerc, 2, true);
+            pubI(ha::CHARGING_ON, liveData->params.chargingOn ? 1 : 0);
+            pubI(ha::IGNITION_ON, liveData->params.ignitionOn ? 1 : 0);
+            pubI(ha::CHARGER_AC_CONNECTED, liveData->params.chargerACconnected ? 1 : 0);
+            pubI(ha::CHARGER_DC_CONNECTED, liveData->params.chargerDCconnected ? 1 : 0);
+            pubF(ha::BAT_POWER, liveData->params.batPowerKw);
+            pubF(ha::BAT_CURRENT, liveData->params.batPowerAmp);
+            pubF(ha::BAT_VOLTAGE, liveData->params.batVoltage);
+            pubF(ha::AUX_VOLTAGE, liveData->params.auxVoltage);
             if (liveData->params.batMinC > -90.0f)
             {
-              pubF("/cell_temp_min", liveData->params.batMinC);
+              pubF(ha::CELL_TEMP_MIN, liveData->params.batMinC);
             }
             if (liveData->params.batMaxC > -90.0f)
             {
-              pubF("/cell_temp_max", liveData->params.batMaxC);
+              pubF(ha::CELL_TEMP_MAX, liveData->params.batMaxC);
             }
             float batTemp = (liveData->params.batTempC > -90.0f) ? liveData->params.batTempC :
                             ((liveData->params.batMinC > -90.0f && liveData->params.batMaxC > -90.0f) ?
                              (liveData->params.batMinC + liveData->params.batMaxC) / 2.0f : -100.0f);
             if (batTemp > -90.0f)
             {
-              pubF("/bat_temp", batTemp);
+              pubF(ha::BAT_TEMP, batTemp);
             }
-            pubF("/outdoor_temp", liveData->params.outdoorTemperature);
-            pubF("/speed", liveData->params.speedKmh);
+            pubF(ha::OUTDOOR_TEMP, liveData->params.outdoorTemperature);
+            pubF(ha::SPEED, liveData->params.speedKmh);
             // Odometer is retained (non-volatile); only publish a positive
             // reading so a transient 0 cannot overwrite the last real value.
             if (liveData->params.odoKm > 0)
             {
-              pubF("/odometer", liveData->params.odoKm, 2, true);
+              pubF(ha::ODOMETER, liveData->params.odoKm, 2, true);
             }
 
             float socKwh = (liveData->params.batEnergyContent > 0) ? liveData->params.batEnergyContent :
@@ -2893,116 +2898,116 @@ bool BoardCore::netSendData(bool sendAbrp)
                             (liveData->params.batteryTotalAvailableKWh * liveData->params.socPerc / 100.0f) : -1.0f);
             if (socKwh >= 0)
             {
-              pubF("/soc_kwh", socKwh, 1, true);
+              pubF(ha::SOC_KWH, socKwh, 1, true);
             }
             if (liveData->params.sohPerc >= 0)
             {
-              pubF("/soh", liveData->params.sohPerc, 1, true);
+              pubF(ha::SOH, liveData->params.sohPerc, 1, true);
             }
             if (liveData->params.batCellMinV > 0)
             {
-              pubF("/cell_voltage_min", liveData->params.batCellMinV, 3);
+              pubF(ha::CELL_VOLTAGE_MIN, liveData->params.batCellMinV, 3);
             }
             if (liveData->params.batCellMaxV > 0)
             {
-              pubF("/cell_voltage_max", liveData->params.batCellMaxV, 3);
+              pubF(ha::CELL_VOLTAGE_MAX, liveData->params.batCellMaxV, 3);
             }
             if (liveData->params.auxCurrentAmp > -900.0f)
             {
-              pubF("/aux_current", liveData->params.auxCurrentAmp, 2);
+              pubF(ha::AUX_CURRENT, liveData->params.auxCurrentAmp, 2);
             }
             if (liveData->params.auxPerc >= 0)
             {
-              pubF("/aux_soc", liveData->params.auxPerc, 0);
+              pubF(ha::AUX_SOC, liveData->params.auxPerc, 0);
             }
 
             // Charging stats
             if (liveData->params.chargerVoltage > 0)
             {
-              pubF("/charger_voltage", liveData->params.chargerVoltage, 1);
+              pubF(ha::CHARGER_VOLTAGE, liveData->params.chargerVoltage, 1);
             }
             if (liveData->params.chargerCurrent > 0)
             {
-              pubF("/charger_current", liveData->params.chargerCurrent, 1);
+              pubF(ha::CHARGER_CURRENT, liveData->params.chargerCurrent, 1);
             }
             if (liveData->params.chargerVoltage > 0 && liveData->params.chargerCurrent > 0)
             {
-              pubF("/charger_power", (liveData->params.chargerVoltage * liveData->params.chargerCurrent) / 1000.0f, 2);
+              pubF(ha::CHARGER_POWER, (liveData->params.chargerVoltage * liveData->params.chargerCurrent) / 1000.0f, 2);
             }
             if (liveData->params.cumulativeEnergyChargedKWh >= 0)
             {
-              pubF("/cumulative_energy_charged", liveData->params.cumulativeEnergyChargedKWh, 1, true);
+              pubF(ha::CUMULATIVE_ENERGY_CHARGED, liveData->params.cumulativeEnergyChargedKWh, 1, true);
               if (liveData->params.cumulativeEnergyChargedKWhStart >= 0 &&
                   (liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart) >= 0)
               {
-                pubF("/charged_session_energy", liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart, 2);
+                pubF(ha::CHARGED_SESSION_ENERGY, liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart, 2);
               }
             }
 
             // Driving & Drivetrain stats
             if (liveData->params.motor1Rpm >= 0)
             {
-              pubI("/motor1_rpm", round(liveData->params.motor1Rpm));
+              pubI(ha::MOTOR1_RPM, round(liveData->params.motor1Rpm));
             }
             if (liveData->params.motor2Rpm >= 0)
             {
-              pubI("/motor2_rpm", round(liveData->params.motor2Rpm));
+              pubI(ha::MOTOR2_RPM, round(liveData->params.motor2Rpm));
             }
             if (liveData->params.motor1TorqueNm > -500.0f)
             {
-              pubF("/motor1_torque", liveData->params.motor1TorqueNm, 1);
+              pubF(ha::MOTOR1_TORQUE, liveData->params.motor1TorqueNm, 1);
             }
             if (liveData->params.motor2TorqueNm > -500.0f)
             {
-              pubF("/motor2_torque", liveData->params.motor2TorqueNm, 1);
+              pubF(ha::MOTOR2_TORQUE, liveData->params.motor2TorqueNm, 1);
             }
             if (liveData->params.motorTempC > -90.0f)
             {
-              pubF("/motor_temp", liveData->params.motorTempC, 1);
+              pubF(ha::MOTOR_TEMP, liveData->params.motorTempC, 1);
             }
             if (liveData->params.inverterTempC > -90.0f)
             {
-              pubF("/inverter_temp", liveData->params.inverterTempC, 1);
+              pubF(ha::INVERTER_TEMP, liveData->params.inverterTempC, 1);
             }
             if (liveData->params.batPowerKwh100 >= 0)
             {
-              pubF("/consumption", liveData->params.batPowerKwh100, 2);
+              pubF(ha::CONSUMPTION, liveData->params.batPowerKwh100, 2);
             }
             if (liveData->params.avgSpeedKmh >= 0)
             {
-              pubF("/avg_speed", liveData->params.avgSpeedKmh, 1);
+              pubF(ha::AVG_SPEED, liveData->params.avgSpeedKmh, 1);
             }
             if (liveData->params.odoKm >= 0 && liveData->params.odoKmStart >= 0 &&
                 (liveData->params.odoKm - liveData->params.odoKmStart) >= 0)
             {
-              pubF("/trip_distance", liveData->params.odoKm - liveData->params.odoKmStart, 1);
+              pubF(ha::TRIP_DISTANCE, liveData->params.odoKm - liveData->params.odoKmStart, 1);
             }
             if (liveData->params.cumulativeEnergyDischargedKWh >= 0)
             {
-              pubF("/cumulative_energy_discharged", liveData->params.cumulativeEnergyDischargedKWh, 1, true);
+              pubF(ha::CUMULATIVE_ENERGY_DISCHARGED, liveData->params.cumulativeEnergyDischargedKWh, 1, true);
               if (liveData->params.cumulativeEnergyDischargedKWhStart >= 0 &&
                   (liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart) >= 0)
               {
-                pubF("/discharged_session_energy", liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart, 2);
+                pubF(ha::DISCHARGED_SESSION_ENERGY, liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart, 2);
               }
             }
 
             // Tires
             if (liveData->params.tireFrontLeftPressureBar >= 0)
             {
-              pubF("/tire_pressure_fl", liveData->params.tireFrontLeftPressureBar, 2, true);
+              pubF(ha::TIRE_PRESSURE_FL, liveData->params.tireFrontLeftPressureBar, 2, true);
             }
             if (liveData->params.tireFrontRightPressureBar >= 0)
             {
-              pubF("/tire_pressure_fr", liveData->params.tireFrontRightPressureBar, 2, true);
+              pubF(ha::TIRE_PRESSURE_FR, liveData->params.tireFrontRightPressureBar, 2, true);
             }
             if (liveData->params.tireRearLeftPressureBar >= 0)
             {
-              pubF("/tire_pressure_rl", liveData->params.tireRearLeftPressureBar, 2, true);
+              pubF(ha::TIRE_PRESSURE_RL, liveData->params.tireRearLeftPressureBar, 2, true);
             }
             if (liveData->params.tireRearRightPressureBar >= 0)
             {
-              pubF("/tire_pressure_rr", liveData->params.tireRearRightPressureBar, 2, true);
+              pubF(ha::TIRE_PRESSURE_RR, liveData->params.tireRearRightPressureBar, 2, true);
             }
           }
 
