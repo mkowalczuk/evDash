@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 37
+#define SETTINGS_VERSION_CURRENT 38
 
 // BLE MAC address connection types
 #define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
@@ -506,6 +506,9 @@ typedef struct
   // == settings version 37
   uint8_t statusLedEnabled;        // 0 - off, 1 - on (onboard WS2812B status LED)
   uint8_t statusLedBrightness;     // 0..100 % (0 = off)
+  // == settings version 38
+  uint8_t logTimestampMode;        // 0 - off (default), 1 - ms since boot, 2 - wall clock
+  uint8_t mqttInstantUpdates;      // 0 - off (default), 1 - publish car values as soon as they update
   //
 } SETTINGS_STRUC;
 

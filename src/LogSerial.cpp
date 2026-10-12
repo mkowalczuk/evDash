@@ -4,6 +4,7 @@
  * Allows setting debug level and logging to SD card.
  */
 #include "LogSerial.h"
+#include <time.h>
 
 /**
  * Constructor
@@ -358,10 +359,52 @@ void LogSerial::writeDirect(const uint8_t *buf, size_t len)
 }
 
 /**
+ * Emit the per-line timestamp prefix directly to the sink (never via write(),
+ * to avoid recursing through newline-normalization and prefix logic). Format:
+ *   mode 1: "[<ms>] "     (monotonic ms since boot)
+ *   mode 2: "[HH:MM:SS] " (wall clock; falls back to ms when time unknown)
+ */
+void LogSerial::emitTimestampPrefix()
+{
+  if (timestampMode == 0)
+  {
+    return;
+  }
+  char buf[20];
+  int len = 0;
+  if (timestampMode == 2 && wallClockFn != nullptr)
+  {
+    time_t now = wallClockFn();
+    if (now > 0)
+    {
+      struct tm tmv;
+      localtime_r(&now, &tmv);
+      len = snprintf(buf, sizeof(buf), "[%02d:%02d:%02d] ", tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    }
+  }
+  if (len == 0)
+  {
+    // mode 1, or mode 2 with no usable wall clock yet: monotonic ms.
+    len = snprintf(buf, sizeof(buf), "[%lu] ", static_cast<unsigned long>(millis()));
+  }
+  if (len > 0)
+  {
+    writeDirect(reinterpret_cast<const uint8_t *>(buf), static_cast<size_t>(len));
+  }
+}
+
+/**
  * Write one byte to console, normalizing lone LF to CRLF for consistent console/SD logs.
  */
 size_t LogSerial::write(uint8_t data)
 {
+  // Start-of-line timestamp: lastChar is '\n' after a completed line, or 0 at
+  // boot. Do not prefix the newline byte itself.
+  if (timestampMode != 0 && data != '\n' && data != '\r' &&
+      (lastChar == '\n' || lastChar == 0))
+  {
+    emitTimestampPrefix();
+  }
   if (data == '\n' && lastChar != '\r')
   {
     const uint8_t cr = '\r';
@@ -380,6 +423,18 @@ size_t LogSerial::write(const uint8_t *buffer, size_t size)
   if (buffer == nullptr || size == 0)
   {
     return 0;
+  }
+
+  // When timestamping is on, defer to the per-byte path so start-of-line
+  // detection and prefixing happen uniformly. This is only taken while a debug
+  // timestamp mode is active, so the normal (mode 0) bulk path is unchanged.
+  if (timestampMode != 0)
+  {
+    for (size_t i = 0; i < size; i++)
+    {
+      write(buffer[i]);
+    }
+    return size;
   }
 
   size_t start = 0;

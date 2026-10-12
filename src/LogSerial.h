@@ -33,6 +33,8 @@ class LogSerial : public HardwareSerial
 protected:
   uint8_t debugLevel;
   uint8_t lastChar = 0;
+  uint8_t timestampMode = 0;                 // 0 off, 1 ms since boot, 2 wall clock
+  time_t (*wallClockFn)() = nullptr;          // returns epoch secs, or 0 if unavailable
   bool logToSdcard = false;
   LogSerialMirrorCallback mirrorCallback = nullptr;
   void *mirrorContext = nullptr;
@@ -49,6 +51,7 @@ protected:
   portMUX_TYPE sdBufMux = portMUX_INITIALIZER_UNLOCKED;
   void pushSdBuffer(const uint8_t *buf, size_t len);
   void writeDirect(const uint8_t *buf, size_t len);
+  void emitTimestampPrefix();
 public:
 #ifndef BOARD_M5STACK_CORES3
   LogSerial();
@@ -57,6 +60,11 @@ public:
   //
   void setDebugLevel(uint8_t aDebugLevel);
   uint8_t getDebugLevel() const { return debugLevel; }
+  // Per-line timestamp prefix: 0 off, 1 ms since boot, 2 wall clock (falls back
+  // to ms when no wall-clock source is set or time is not yet known).
+  void setTimestampMode(uint8_t mode) { timestampMode = mode; }
+  uint8_t getTimestampMode() const { return timestampMode; }
+  void setWallClockSource(time_t (*fn)()) { wallClockFn = fn; }
   bool isDebug(uint8_t aDebugLevel) const { return (debugLevel & aDebugLevel) != 0; }
   void setLogToSdcard(bool state);
   bool startSdLogging(const char *path);

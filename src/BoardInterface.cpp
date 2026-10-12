@@ -40,6 +40,22 @@ It handles attaching communications and live data objects. And provides methods 
 #include "EvDashMobileRelay.h"
 
 extern EvDashMobileRelay *mobileRelay;
+extern LiveData *liveData;
+
+/**
+ * Wall-clock source for the logger timestamp prefix. Free function (the logger
+ * takes a plain function pointer); reads the global liveData. Returns epoch
+ * seconds only once NTP/GPS has set the time, else 0 so the logger falls back
+ * to monotonic ms.
+ */
+static time_t logWallClockNow()
+{
+  if (liveData != nullptr && liveData->params.ntpTimeSet)
+  {
+    return liveData->params.currentTime;
+  }
+  return 0;
+}
 
 /**
  * Set live data
@@ -334,6 +350,9 @@ void BoardInterface::loadSettings()
   // v37
   liveData->settings.statusLedEnabled = 1;
   liveData->settings.statusLedBrightness = 20;
+  // v38
+  liveData->settings.logTimestampMode = 0;   // off by default
+  liveData->settings.mqttInstantUpdates = 0; // off by default
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -615,9 +634,15 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 36)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 37;
         liveData->tmpSettings.statusLedEnabled = 1;
         liveData->tmpSettings.statusLedBrightness = 20;
+      }
+      if (liveData->tmpSettings.settingsVersion == 37)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.logTimestampMode = 0;
+        liveData->tmpSettings.mqttInstantUpdates = 0;
       }
 
       // Save upgraded structure
@@ -725,6 +750,8 @@ void BoardInterface::loadSettings()
   }
 
   syslog->setDebugLevel(liveData->settings.debugLevel);
+  syslog->setTimestampMode(liveData->settings.logTimestampMode);
+  syslog->setWallClockSource(&logWallClockNow);
   applyTimezone();
 }
 
@@ -2596,6 +2623,26 @@ bool BoardInterface::customConsoleCommand(String cmd)
                      (liveData->settings.debugLevel & DEBUG_GPS) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_ABRP) ? "on" : "off",
                      (liveData->settings.debugLevel & DEBUG_MODEM) ? "on" : "off");
+    }
+    return true;
+  }
+
+  // Log line timestamp prefix
+  if (key.equalsIgnoreCase("logTimestamp") || key.equalsIgnoreCase("logTimestampMode"))
+  {
+    if (isSetter)
+    {
+      uint8_t mode = static_cast<uint8_t>(value.toInt());
+      if (mode > 2)
+        mode = 2;
+      liveData->settings.logTimestampMode = mode;
+      syslog->setTimestampMode(mode);
+      saveSettings();
+      syslog->printf("logTimestamp set to: %u (0=off, 1=ms since boot, 2=wall clock)\n", mode);
+    }
+    else
+    {
+      syslog->printf("logTimestamp: %u (0=off, 1=ms since boot, 2=wall clock)\n", liveData->settings.logTimestampMode);
     }
     return true;
   }
