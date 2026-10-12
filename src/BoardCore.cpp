@@ -2838,37 +2838,54 @@ bool BoardCore::netSendData(bool sendAbrp)
           // Car telemetry (only when car CAN/BLE is communicating and socPerc >= 0)
           if (liveData->params.socPerc >= 0)
           {
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc", liveData->params.socPerc, 2, true);
-            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charging_on", liveData->params.chargingOn ? 1 : 0);
-            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/ignition_on", liveData->params.ignitionOn ? 1 : 0);
-            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charger_ac_connected", liveData->params.chargerACconnected ? 1 : 0);
-            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/charger_dc_connected", liveData->params.chargerDCconnected ? 1 : 0);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_power", liveData->params.batPowerKw);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_current", liveData->params.batPowerAmp);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_voltage", liveData->params.batVoltage);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/aux_voltage", liveData->params.auxVoltage);
+            // Route car-telemetry publishes through these so the active car can
+            // suppress fields it never provides (same seam as discovery). The
+            // suffix's leading '/' is skipped to get the object_id. GPS and
+            // heartbeat publishes stay direct — they are not car telemetry.
+            CarInterface *car = carInterface;
+            auto carPublishes = [car](const char *suffix) {
+              return car == nullptr || car->supportsHaTelemetry(suffix + 1);
+            };
+            auto pubF = [&](const char *suffix, float value, uint8_t precision = 2, bool retain = false) {
+              if (!carPublishes(suffix)) return;
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, suffix, value, precision, retain);
+            };
+            auto pubI = [&](const char *suffix, int32_t value) {
+              if (!carPublishes(suffix)) return;
+              published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, suffix, value);
+            };
+
+            pubF("/soc", liveData->params.socPerc, 2, true);
+            pubI("/charging_on", liveData->params.chargingOn ? 1 : 0);
+            pubI("/ignition_on", liveData->params.ignitionOn ? 1 : 0);
+            pubI("/charger_ac_connected", liveData->params.chargerACconnected ? 1 : 0);
+            pubI("/charger_dc_connected", liveData->params.chargerDCconnected ? 1 : 0);
+            pubF("/bat_power", liveData->params.batPowerKw);
+            pubF("/bat_current", liveData->params.batPowerAmp);
+            pubF("/bat_voltage", liveData->params.batVoltage);
+            pubF("/aux_voltage", liveData->params.auxVoltage);
             if (liveData->params.batMinC > -90.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_temp_min", liveData->params.batMinC);
+              pubF("/cell_temp_min", liveData->params.batMinC);
             }
             if (liveData->params.batMaxC > -90.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_temp_max", liveData->params.batMaxC);
+              pubF("/cell_temp_max", liveData->params.batMaxC);
             }
             float batTemp = (liveData->params.batTempC > -90.0f) ? liveData->params.batTempC :
                             ((liveData->params.batMinC > -90.0f && liveData->params.batMaxC > -90.0f) ?
                              (liveData->params.batMinC + liveData->params.batMaxC) / 2.0f : -100.0f);
             if (batTemp > -90.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/bat_temp", batTemp);
+              pubF("/bat_temp", batTemp);
             }
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/outdoor_temp", liveData->params.outdoorTemperature);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/speed", liveData->params.speedKmh);
+            pubF("/outdoor_temp", liveData->params.outdoorTemperature);
+            pubF("/speed", liveData->params.speedKmh);
             // Odometer is retained (non-volatile); only publish a positive
             // reading so a transient 0 cannot overwrite the last real value.
             if (liveData->params.odoKm > 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/odometer", liveData->params.odoKm, 2, true);
+              pubF("/odometer", liveData->params.odoKm, 2, true);
             }
 
             float socKwh = (liveData->params.batEnergyContent > 0) ? liveData->params.batEnergyContent :
@@ -2876,116 +2893,116 @@ bool BoardCore::netSendData(bool sendAbrp)
                             (liveData->params.batteryTotalAvailableKWh * liveData->params.socPerc / 100.0f) : -1.0f);
             if (socKwh >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soc_kwh", socKwh, 1, true);
+              pubF("/soc_kwh", socKwh, 1, true);
             }
             if (liveData->params.sohPerc >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/soh", liveData->params.sohPerc, 1, true);
+              pubF("/soh", liveData->params.sohPerc, 1, true);
             }
             if (liveData->params.batCellMinV > 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_voltage_min", liveData->params.batCellMinV, 3);
+              pubF("/cell_voltage_min", liveData->params.batCellMinV, 3);
             }
             if (liveData->params.batCellMaxV > 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cell_voltage_max", liveData->params.batCellMaxV, 3);
+              pubF("/cell_voltage_max", liveData->params.batCellMaxV, 3);
             }
             if (liveData->params.auxCurrentAmp > -900.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/aux_current", liveData->params.auxCurrentAmp, 2);
+              pubF("/aux_current", liveData->params.auxCurrentAmp, 2);
             }
             if (liveData->params.auxPerc >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/aux_soc", liveData->params.auxPerc, 0);
+              pubF("/aux_soc", liveData->params.auxPerc, 0);
             }
 
             // Charging stats
             if (liveData->params.chargerVoltage > 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charger_voltage", liveData->params.chargerVoltage, 1);
+              pubF("/charger_voltage", liveData->params.chargerVoltage, 1);
             }
             if (liveData->params.chargerCurrent > 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charger_current", liveData->params.chargerCurrent, 1);
+              pubF("/charger_current", liveData->params.chargerCurrent, 1);
             }
             if (liveData->params.chargerVoltage > 0 && liveData->params.chargerCurrent > 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charger_power", (liveData->params.chargerVoltage * liveData->params.chargerCurrent) / 1000.0f, 2);
+              pubF("/charger_power", (liveData->params.chargerVoltage * liveData->params.chargerCurrent) / 1000.0f, 2);
             }
             if (liveData->params.cumulativeEnergyChargedKWh >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_charged", liveData->params.cumulativeEnergyChargedKWh, 1, true);
+              pubF("/cumulative_energy_charged", liveData->params.cumulativeEnergyChargedKWh, 1, true);
               if (liveData->params.cumulativeEnergyChargedKWhStart >= 0 &&
                   (liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart) >= 0)
               {
-                published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/charged_session_energy", liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart, 2);
+                pubF("/charged_session_energy", liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart, 2);
               }
             }
 
             // Driving & Drivetrain stats
             if (liveData->params.motor1Rpm >= 0)
             {
-              published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/motor1_rpm", round(liveData->params.motor1Rpm));
+              pubI("/motor1_rpm", round(liveData->params.motor1Rpm));
             }
             if (liveData->params.motor2Rpm >= 0)
             {
-              published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/motor2_rpm", round(liveData->params.motor2Rpm));
+              pubI("/motor2_rpm", round(liveData->params.motor2Rpm));
             }
             if (liveData->params.motor1TorqueNm > -500.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/motor1_torque", liveData->params.motor1TorqueNm, 1);
+              pubF("/motor1_torque", liveData->params.motor1TorqueNm, 1);
             }
             if (liveData->params.motor2TorqueNm > -500.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/motor2_torque", liveData->params.motor2TorqueNm, 1);
+              pubF("/motor2_torque", liveData->params.motor2TorqueNm, 1);
             }
             if (liveData->params.motorTempC > -90.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/motor_temp", liveData->params.motorTempC, 1);
+              pubF("/motor_temp", liveData->params.motorTempC, 1);
             }
             if (liveData->params.inverterTempC > -90.0f)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/inverter_temp", liveData->params.inverterTempC, 1);
+              pubF("/inverter_temp", liveData->params.inverterTempC, 1);
             }
             if (liveData->params.batPowerKwh100 >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/consumption", liveData->params.batPowerKwh100, 2);
+              pubF("/consumption", liveData->params.batPowerKwh100, 2);
             }
             if (liveData->params.avgSpeedKmh >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/avg_speed", liveData->params.avgSpeedKmh, 1);
+              pubF("/avg_speed", liveData->params.avgSpeedKmh, 1);
             }
             if (liveData->params.odoKm >= 0 && liveData->params.odoKmStart >= 0 &&
                 (liveData->params.odoKm - liveData->params.odoKmStart) >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/trip_distance", liveData->params.odoKm - liveData->params.odoKmStart, 1);
+              pubF("/trip_distance", liveData->params.odoKm - liveData->params.odoKmStart, 1);
             }
             if (liveData->params.cumulativeEnergyDischargedKWh >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_discharged", liveData->params.cumulativeEnergyDischargedKWh, 1, true);
+              pubF("/cumulative_energy_discharged", liveData->params.cumulativeEnergyDischargedKWh, 1, true);
               if (liveData->params.cumulativeEnergyDischargedKWhStart >= 0 &&
                   (liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart) >= 0)
               {
-                published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/discharged_session_energy", liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart, 2);
+                pubF("/discharged_session_energy", liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart, 2);
               }
             }
 
             // Tires
             if (liveData->params.tireFrontLeftPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fl", liveData->params.tireFrontLeftPressureBar, 2, true);
+              pubF("/tire_pressure_fl", liveData->params.tireFrontLeftPressureBar, 2, true);
             }
             if (liveData->params.tireFrontRightPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_fr", liveData->params.tireFrontRightPressureBar, 2, true);
+              pubF("/tire_pressure_fr", liveData->params.tireFrontRightPressureBar, 2, true);
             }
             if (liveData->params.tireRearLeftPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rl", liveData->params.tireRearLeftPressureBar, 2, true);
+              pubF("/tire_pressure_rl", liveData->params.tireRearLeftPressureBar, 2, true);
             }
             if (liveData->params.tireRearRightPressureBar >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/tire_pressure_rr", liveData->params.tireRearRightPressureBar, 2, true);
+              pubF("/tire_pressure_rr", liveData->params.tireRearRightPressureBar, 2, true);
             }
           }
 
