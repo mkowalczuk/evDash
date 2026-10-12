@@ -156,7 +156,8 @@ protected:
   void publishHomeAssistantDiscovery();
   void publishHaSensor(const char *component, const char *objectId, const char *name,
                        const char *deviceClass, const char *unit, const char *stateClass,
-                       const char *entityCategory = nullptr, const char *payloadOn = nullptr, const char *payloadOff = nullptr);
+                       const char *entityCategory = nullptr, const char *payloadOn = nullptr, const char *payloadOff = nullptr,
+                       int expireAfterSec = 0, const char *availabilityTopicOverride = nullptr);
   // When non-null during publishHomeAssistantDiscovery(), publishHaSensor()
   // appends a component entry to this object (device-based discovery, one
   // retained message) instead of publishing one message per entity.

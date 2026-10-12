@@ -2355,6 +2355,10 @@ bool BoardCore::ensureMqttConnected()
   {
     syslog->info(DEBUG_NET, "MQTT connected successfully");
     publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
+    // Dedicated always-online availability for non-volatile entities. Unlike
+    // /status it is not registered as the LWT, so it survives an ungraceful
+    // disconnect and keeps those entities showing their last retained value.
+    publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status_persist", "online", true);
     if (liveData->settings.mqttHomeAssistant == 1)
     {
       publishHomeAssistantDiscovery();
@@ -2386,7 +2390,8 @@ bool BoardCore::ensureMqttConnected()
 
 void BoardCore::publishHaSensor(const char *component, const char *objectId, const char *name,
                                    const char *deviceClass, const char *unit, const char *stateClass,
-                                   const char *entityCategory, const char *payloadOn, const char *payloadOff)
+                                   const char *entityCategory, const char *payloadOn, const char *payloadOff,
+                                   int expireAfterSec, const char *availabilityTopicOverride)
 {
   const char *rawTopic = liveData->settings.mqttPubTopic;
   const char *baseTopic = (strlen(rawTopic) > 0) ? rawTopic : "evdash";
@@ -2424,6 +2429,20 @@ void BoardCore::publishHaSensor(const char *component, const char *objectId, con
     if (entityCategory && strlen(entityCategory) > 0) c["ent_cat"] = entityCategory;
     if (payloadOn) c["pl_on"] = payloadOn;
     if (payloadOff) c["pl_off"] = payloadOff;
+    // Volatile telemetry: auto-expire so stale values clear after a real gap
+    // (short reporting blips shorter than this stay available).
+    if (expireAfterSec > 0) c["exp_aft"] = expireAfterSec;
+    // Non-volatile entities override the shared device availability with an
+    // always-online topic so they keep showing their last retained value even
+    // when the device LWT marks the device offline. HA device-discovery
+    // components otherwise inherit the shared root availability and cannot opt
+    // out by omission.
+    if (availabilityTopicOverride && strlen(availabilityTopicOverride) > 0)
+    {
+      c["avty_t"] = availabilityTopicOverride;
+      c["pl_avail"] = "online";
+      c["pl_not_avail"] = "offline";
+    }
     return;
   }
 
@@ -2529,8 +2548,11 @@ void BoardCore::publishHomeAssistantDiscovery()
 
   // One retained device-discovery message: homeassistant/device/<id>/config.
   // Heap-backed (PSRAM when present) because the bundle of ~55 entities is far
-  // larger than the per-entity StaticJsonDocument.
-  HeapCapsJsonDocument doc(16384);
+  // larger than the per-entity StaticJsonDocument. Capacity carries headroom
+  // for per-entity expire_after and the per-entity availability override on
+  // the non-volatile entities. BasicJsonDocument does not auto-grow, so an
+  // undersized pool would silently drop component keys.
+  HeapCapsJsonDocument doc(24576);
 
   JsonObject dev = doc.createNestedObject("dev");
   JsonArray ids = dev.createNestedArray("ids");
@@ -2554,68 +2576,86 @@ void BoardCore::publishHomeAssistantDiscovery()
   doc["pl_avail"] = "online";
   doc["pl_not_avail"] = "offline";
 
+  // Always-online availability for non-volatile entities (odometer, cumulative
+  // energy, SoC/SoH): bound to a dedicated topic that is never part of the LWT,
+  // so these keep showing their last retained value even when the device goes
+  // offline. The shared device availability above would otherwise mark them
+  // unavailable together with everything else.
+  char availPersistTopic[96];
+  snprintf(availPersistTopic, sizeof(availPersistTopic), "%s/status_persist", baseTopic);
+
+  // Volatile telemetry auto-expires after a quiet period that scales with the
+  // configured upload interval: short reporting gaps stay available, longer
+  // interruptions clear stale live values. Mirrors the keepalive derivation.
+  uint32_t uploadIntervalSec = liveData->settings.remoteUploadIntervalSec;
+  if (uploadIntervalSec == 0)
+  {
+    uploadIntervalSec = 60;
+  }
+  int expireAfterSec = static_cast<int>(uploadIntervalSec * 3 + 30);
+
   JsonObject cmps = doc.createNestedObject("cmps");
   haComponentsAccumulator = &cmps; // publishHaSensor now appends into cmps
 
   // Battery
-  publishHaSensor("sensor", "soc", "Battery State of Charge", "battery", "%", "measurement");
-  publishHaSensor("sensor", "soc_kwh", "Battery SoC in kWh", "energy", "kWh", "measurement");
-  publishHaSensor("sensor", "soh", "Battery State of Health", "battery", "%", "measurement");
-  publishHaSensor("sensor", "bat_power", "Battery Power", "power", "kW", "measurement");
-  publishHaSensor("sensor", "bat_current", "Battery Current", "current", "A", "measurement");
-  publishHaSensor("sensor", "bat_voltage", "Battery Voltage", "voltage", "V", "measurement");
-  publishHaSensor("sensor", "bat_temp", "Battery Temperature", "temperature", "°C", "measurement");
-  publishHaSensor("sensor", "cell_temp_min", "Cell Temperature Min", "temperature", "°C", "measurement");
-  publishHaSensor("sensor", "cell_temp_max", "Cell Temperature Max", "temperature", "°C", "measurement");
-  publishHaSensor("sensor", "cell_voltage_min", "Cell Voltage Min", "voltage", "V", "measurement");
-  publishHaSensor("sensor", "cell_voltage_max", "Cell Voltage Max", "voltage", "V", "measurement");
+  publishHaSensor("sensor", "soc", "Battery State of Charge", "battery", "%", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "soc_kwh", "Battery SoC in kWh", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "soh", "Battery State of Health", "battery", "%", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "bat_power", "Battery Power", "power", "kW", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "bat_current", "Battery Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "bat_voltage", "Battery Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "bat_temp", "Battery Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "cell_temp_min", "Cell Temperature Min", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "cell_temp_max", "Cell Temperature Max", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "cell_voltage_min", "Cell Voltage Min", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "cell_voltage_max", "Cell Voltage Max", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // 12V Aux
-  publishHaSensor("sensor", "aux_voltage", "Aux 12V Battery Voltage", "voltage", "V", "measurement");
-  publishHaSensor("sensor", "aux_current", "Aux 12V Battery Current", "current", "A", "measurement");
-  publishHaSensor("sensor", "aux_soc", "Aux 12V State of Charge", "battery", "%", "measurement");
+  publishHaSensor("sensor", "aux_voltage", "Aux 12V Battery Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "aux_current", "Aux 12V Battery Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "aux_soc", "Aux 12V State of Charge", "battery", "%", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // Charging
-  publishHaSensor("binary_sensor", "charging_on", "Charging", "battery_charging", nullptr, nullptr, nullptr, "1", "0");
-  publishHaSensor("binary_sensor", "charger_ac_connected", "Charger AC Connected", "plug", nullptr, nullptr, nullptr, "1", "0");
-  publishHaSensor("binary_sensor", "charger_dc_connected", "Charger DC Fast Charging", "plug", nullptr, nullptr, nullptr, "1", "0");
-  publishHaSensor("sensor", "charger_power", "Station Power", "power", "kW", "measurement");
-  publishHaSensor("sensor", "charger_voltage", "Station Voltage", "voltage", "V", "measurement");
-  publishHaSensor("sensor", "charger_current", "Station Current", "current", "A", "measurement");
-  publishHaSensor("sensor", "charged_session_energy", "Charging Session Energy", "energy", "kWh", "measurement");
-  publishHaSensor("sensor", "cumulative_energy_charged", "Total Charged Energy", "energy", "kWh", "total_increasing");
+  publishHaSensor("binary_sensor", "charging_on", "Charging", "battery_charging", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("binary_sensor", "charger_ac_connected", "Charger AC Connected", "plug", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("binary_sensor", "charger_dc_connected", "Charger DC Fast Charging", "plug", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("sensor", "charger_power", "Station Power", "power", "kW", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "charger_voltage", "Station Voltage", "voltage", "V", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "charger_current", "Station Current", "current", "A", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "charged_session_energy", "Charging Session Energy", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "cumulative_energy_charged", "Total Charged Energy", "energy", "kWh", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
 
   // Driving & Drivetrain
-  publishHaSensor("binary_sensor", "ignition_on", "Ignition", "power", nullptr, nullptr, nullptr, "1", "0");
-  publishHaSensor("sensor", "speed", "Vehicle Speed", "speed", "km/h", "measurement");
-  publishHaSensor("sensor", "odometer", "Odometer", "distance", "km", "total_increasing");
-  publishHaSensor("sensor", "trip_distance", "Trip Distance", "distance", "km", "measurement");
-  publishHaSensor("sensor", "avg_speed", "Average Speed", "speed", "km/h", "measurement");
-  publishHaSensor("sensor", "consumption", "Energy Consumption", nullptr, "kWh/100km", "measurement");
-  publishHaSensor("sensor", "discharged_session_energy", "Trip Discharged Energy", "energy", "kWh", "measurement");
-  publishHaSensor("sensor", "cumulative_energy_discharged", "Total Discharged Energy", "energy", "kWh", "total_increasing");
-  publishHaSensor("sensor", "motor1_rpm", "Motor 1 RPM", nullptr, "rpm", "measurement");
-  publishHaSensor("sensor", "motor2_rpm", "Motor 2 RPM", nullptr, "rpm", "measurement");
-  publishHaSensor("sensor", "motor1_torque", "Motor 1 Torque", nullptr, "Nm", "measurement");
-  publishHaSensor("sensor", "motor2_torque", "Motor 2 Torque", nullptr, "Nm", "measurement");
-  publishHaSensor("sensor", "motor_temp", "Motor Temperature", "temperature", "°C", "measurement");
-  publishHaSensor("sensor", "inverter_temp", "Inverter Temperature", "temperature", "°C", "measurement");
+  publishHaSensor("binary_sensor", "ignition_on", "Ignition", "power", nullptr, nullptr, nullptr, "1", "0", expireAfterSec);
+  publishHaSensor("sensor", "speed", "Vehicle Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "odometer", "Odometer", "distance", "km", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "trip_distance", "Trip Distance", "distance", "km", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "avg_speed", "Average Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "consumption", "Energy Consumption", nullptr, "kWh/100km", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "discharged_session_energy", "Trip Discharged Energy", "energy", "kWh", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "cumulative_energy_discharged", "Total Discharged Energy", "energy", "kWh", "total_increasing", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "motor1_rpm", "Motor 1 RPM", nullptr, "rpm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "motor2_rpm", "Motor 2 RPM", nullptr, "rpm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "motor1_torque", "Motor 1 Torque", nullptr, "Nm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "motor2_torque", "Motor 2 Torque", nullptr, "Nm", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "motor_temp", "Motor Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "inverter_temp", "Inverter Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // Tires
-  publishHaSensor("sensor", "tire_pressure_fl", "Tire Pressure Front Left", "pressure", "bar", "measurement");
-  publishHaSensor("sensor", "tire_pressure_fr", "Tire Pressure Front Right", "pressure", "bar", "measurement");
-  publishHaSensor("sensor", "tire_pressure_rl", "Tire Pressure Rear Left", "pressure", "bar", "measurement");
-  publishHaSensor("sensor", "tire_pressure_rr", "Tire Pressure Rear Right", "pressure", "bar", "measurement");
+  publishHaSensor("sensor", "tire_pressure_fl", "Tire Pressure Front Left", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "tire_pressure_fr", "Tire Pressure Front Right", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "tire_pressure_rl", "Tire Pressure Rear Left", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
+  publishHaSensor("sensor", "tire_pressure_rr", "Tire Pressure Rear Right", "pressure", "bar", "measurement", nullptr, nullptr, nullptr, 0, availPersistTopic);
 
   // Environment
-  publishHaSensor("sensor", "outdoor_temp", "Outdoor Temperature", "temperature", "°C", "measurement");
+  publishHaSensor("sensor", "outdoor_temp", "Outdoor Temperature", "temperature", "°C", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // GPS
-  publishHaSensor("sensor", "gps_lat", "GPS Latitude", nullptr, "°", nullptr);
-  publishHaSensor("sensor", "gps_lon", "GPS Longitude", nullptr, "°", nullptr);
-  publishHaSensor("sensor", "gps_speed", "GPS Speed", "speed", "km/h", "measurement");
-  publishHaSensor("sensor", "gps_alt", "GPS Altitude", "distance", "m", nullptr);
-  publishHaSensor("sensor", "gps_heading", "GPS Heading", nullptr, "°", "measurement");
+  publishHaSensor("sensor", "gps_lat", "GPS Latitude", nullptr, "°", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "gps_lon", "GPS Longitude", nullptr, "°", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "gps_speed", "GPS Speed", "speed", "km/h", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "gps_alt", "GPS Altitude", "distance", "m", nullptr, nullptr, nullptr, nullptr, expireAfterSec);
+  publishHaSensor("sensor", "gps_heading", "GPS Heading", nullptr, "°", "measurement", nullptr, nullptr, nullptr, expireAfterSec);
 
   // Diagnostics
   publishHaSensor("sensor", "status", "Device Status", nullptr, nullptr, nullptr, "diagnostic");
@@ -2816,7 +2856,12 @@ bool BoardCore::netSendData(bool sendAbrp)
             }
             published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/outdoor_temp", liveData->params.outdoorTemperature);
             published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/speed", liveData->params.speedKmh);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/odometer", liveData->params.odoKm);
+            // Odometer is retained (non-volatile); only publish a positive
+            // reading so a transient 0 cannot overwrite the last real value.
+            if (liveData->params.odoKm > 0)
+            {
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/odometer", liveData->params.odoKm, 2, true);
+            }
 
             float socKwh = (liveData->params.batEnergyContent > 0) ? liveData->params.batEnergyContent :
                            ((liveData->params.batteryTotalAvailableKWh > 0) ?
@@ -2861,7 +2906,7 @@ bool BoardCore::netSendData(bool sendAbrp)
             }
             if (liveData->params.cumulativeEnergyChargedKWh >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_charged", liveData->params.cumulativeEnergyChargedKWh, 1);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_charged", liveData->params.cumulativeEnergyChargedKWh, 1, true);
               if (liveData->params.cumulativeEnergyChargedKWhStart >= 0 &&
                   (liveData->params.cumulativeEnergyChargedKWh - liveData->params.cumulativeEnergyChargedKWhStart) >= 0)
               {
@@ -2909,7 +2954,7 @@ bool BoardCore::netSendData(bool sendAbrp)
             }
             if (liveData->params.cumulativeEnergyDischargedKWh >= 0)
             {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_discharged", liveData->params.cumulativeEnergyDischargedKWh, 1);
+              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/cumulative_energy_discharged", liveData->params.cumulativeEnergyDischargedKWh, 1, true);
               if (liveData->params.cumulativeEnergyDischargedKWhStart >= 0 &&
                   (liveData->params.cumulativeEnergyDischargedKWh - liveData->params.cumulativeEnergyDischargedKWhStart) >= 0)
               {
