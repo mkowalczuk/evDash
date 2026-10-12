@@ -1,8 +1,7 @@
 
 // This file is display-only: it draws on a 320x240 panel and reads touch and
-// buttons. A headless board has no screen, so it is not compiled at all there.
-// Everything display-independent lives in BoardCore.cpp.
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+// buttons. A headless board has no screen, so build_src_filter excludes it from
+// non-M5 environments. Everything display-independent lives in BoardCore.cpp.
 
 /**
  * Initializes the board hardware and peripherals.
@@ -2345,5 +2344,3 @@ int Board320_240::gpsUartTxPin()
 {
   return SERIAL2_TX;
 }
-
-#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3

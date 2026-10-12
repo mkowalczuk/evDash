@@ -1,5 +1,3 @@
-#ifdef BOARD_WAVESHARE_SIM7670G
-
 #include "Sim7670G.h"
 #include "LogSerial.h"
 #include "config.h"
@@ -1761,6 +1759,3 @@ bool Sim7670G::ping(const char *host, uint32_t timeoutMs)
   syslog->info(DEBUG_NET, String("NET: ping ") + host + (ok ? " OK (reply)" : " FAILED (no reply)"));
   return ok;
 }
-
-#endif // BOARD_WAVESHARE_SIM7670G
-

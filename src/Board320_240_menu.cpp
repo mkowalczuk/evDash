@@ -6,9 +6,9 @@
 #include "Board320_240.h"
 #include "EvDashMobileRelay.h"
 
-// This file is display-only. A headless board has no screen, so it is not
-// compiled at all there; everything display-independent lives in BoardCore.cpp.
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+// This file is display-only. A headless board has no screen, so build_src_filter
+// excludes it from non-M5 environments; everything display-independent lives in
+// BoardCore.cpp.
 
 extern EvDashMobileRelay *mobileRelay;
 
@@ -2250,4 +2250,3 @@ void Board320_240::menuItemClick()
   // Close menu
   hideMenu();
 }
-#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3

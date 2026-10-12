@@ -1,4 +1,3 @@
-#ifdef BOARD_WAVESHARE_SIM7670G
 #include "BoardWaveshareSim7670g.h"
 #include "LogSerial.h"
 #include "config.h"
@@ -641,5 +640,3 @@ void BoardWaveshareSim7670g::batteryInfo()
                  liveData->params.auxVoltage,
                  liveData->params.auxPerc);
 }
-
-#endif // BOARD_WAVESHARE_SIM7670G

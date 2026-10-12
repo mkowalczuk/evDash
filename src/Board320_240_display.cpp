@@ -5,9 +5,8 @@
 #include "Board320_240.h"
 
 // This file is display-only: it draws on a 320x240 panel and reads touch and
-// buttons. A headless board has no screen, so it is not compiled at all there.
-// Everything display-independent lives in BoardCore.cpp.
-#if defined(BOARD_M5STACK_CORE2) || defined(BOARD_M5STACK_CORES3)
+// buttons. A headless board has no screen, so build_src_filter excludes it from
+// non-M5 environments. Everything display-independent lives in BoardCore.cpp.
 
 /**
  * Draws the main screen (screen 1) with live vehicle data.
@@ -1535,4 +1534,3 @@ void Board320_240::drawSceneDebug()
     }
   }
 }
-#endif // BOARD_M5STACK_CORE2 || BOARD_M5STACK_CORES3
