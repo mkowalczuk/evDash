@@ -162,6 +162,11 @@ protected:
   // appends a component entry to this object (device-based discovery, one
   // retained message) instead of publishing one message per entity.
   void *haComponentsAccumulator = nullptr;
+  // When true, netSendData() skips the artificial/periodic heartbeat block and
+  // publishes only live car telemetry — used by the instant-update path.
+  bool mqttInstantMode = false;
+  uint32_t lastInstantPublishMs = 0;
+  time_t lastInstantCanbusResponseTime = 0;
   uint32_t wifiTransferredBytes = 0;
   uint32_t wifiTransferLastActivityMs = 0;
   uint32_t lastFirmwareVersionCheckMs = 0;

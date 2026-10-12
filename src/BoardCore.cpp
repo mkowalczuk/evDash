@@ -2830,11 +2830,17 @@ bool BoardCore::netSendData(bool sendAbrp)
         if (ensureMqttConnected())
         {
           bool published = true;
-          // Device & connection heartbeat (always sent when connected to MQTT broker)
-          published &= publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
-          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/uptime", millis() / 1000);
-          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifi_rssi", (trans != nullptr) ? trans->rssi() : 0);
-          published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/car_connected", (liveData->params.socPerc >= 0) ? 1 : 0);
+          // Device & connection heartbeat (always sent when connected to MQTT
+          // broker, EXCEPT on an instant-update pass — those are triggered by a
+          // fresh car reading and must not republish artificial/periodic values
+          // like uptime every second).
+          if (!mqttInstantMode)
+          {
+            published &= publishMqttString(*mqttClient, liveData->settings.mqttPubTopic, "/status", "online", true);
+            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/uptime", millis() / 1000);
+            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifi_rssi", (trans != nullptr) ? trans->rssi() : 0);
+            published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/car_connected", (liveData->params.socPerc >= 0) ? 1 : 0);
+          }
 
           // Car telemetry (only when car CAN/BLE is communicating and socPerc >= 0)
           if (liveData->params.socPerc >= 0)
@@ -3419,6 +3425,35 @@ void BoardCore::netLoop()
     netSendData(false);
     int64_t endTime = esp_timer_get_time();
     lastNetSendDurationMs = static_cast<uint32_t>((endTime - startTime) / 1000);
+    syslog->info(DEBUG_NET, String("Net send cycle took ") + lastNetSendDurationMs + " ms");
+  }
+
+  // Instant MQTT updates: when enabled, publish live car telemetry as soon as a
+  // new CAN/BLE response lands, instead of waiting for the periodic interval.
+  // The artificial/periodic heartbeat (status/uptime/wifi_rssi/car_connected)
+  // is NOT sent here — it stays on the interval above — so enabling this does
+  // not flood the broker with once-a-second constants. A short debounce caps
+  // the rate since a car can produce many parsed frames per second.
+  if (netReady && liveData->settings.mqttEnabled == 1 &&
+      liveData->settings.mqttInstantUpdates == 1 &&
+      liveData->params.socPerc >= 0)
+  {
+    const uint32_t kInstantDebounceMs = 500;
+    const bool newResponse = (liveData->params.lastCanbusResponseTime != lastInstantCanbusResponseTime);
+    if (newResponse &&
+        (lastInstantPublishMs == 0 || (millis() - lastInstantPublishMs) >= kInstantDebounceMs))
+    {
+      lastInstantCanbusResponseTime = liveData->params.lastCanbusResponseTime;
+      lastInstantPublishMs = millis();
+      syslog->info(DEBUG_NET, "MQTT instant update");
+      int64_t startTime = esp_timer_get_time();
+      mqttInstantMode = true;
+      netSendData(false);
+      mqttInstantMode = false;
+      int64_t endTime = esp_timer_get_time();
+      lastNetSendDurationMs = static_cast<uint32_t>((endTime - startTime) / 1000);
+      syslog->info(DEBUG_NET, String("MQTT instant update took ") + lastNetSendDurationMs + " ms");
+    }
   }
 
   // Upload to ABRP (interval stored in 0.5-second steps: 1 => 0.5s, 10 => 5.0s)

@@ -2647,6 +2647,30 @@ bool BoardInterface::customConsoleCommand(String cmd)
     return true;
   }
 
+  // Instant MQTT updates (publish car values as soon as they change)
+  if (key.equalsIgnoreCase("mqttInstant") || key.equalsIgnoreCase("mqttInstantUpdates"))
+  {
+    if (isSetter)
+    {
+      int8_t b = parseBool(value);
+      if (b != -1)
+      {
+        liveData->settings.mqttInstantUpdates = b;
+        saveSettings();
+        syslog->printf("mqttInstant set to: %s\n", (liveData->settings.mqttInstantUpdates == 1) ? "ON (1)" : "OFF (0)");
+      }
+      else
+      {
+        syslog->println("Error: Use 1/0, on/off, true/false");
+      }
+    }
+    else
+    {
+      syslog->printf("mqttInstant: %s\n", (liveData->settings.mqttInstantUpdates == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+
   // Legacy OBD2 WiFi
   if (key.equalsIgnoreCase("obd2WifiIp") || key.equalsIgnoreCase("obd2ip"))
   {
