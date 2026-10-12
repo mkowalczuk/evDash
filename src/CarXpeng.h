@@ -9,4 +9,5 @@ public:
   void activateCommandQueue() override;
   void parseRowMerged() override;
   void loadTestData() override;
+  bool supportsHaTelemetry(const char *objectId) override;
 };

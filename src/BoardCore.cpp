@@ -2393,6 +2393,14 @@ void BoardCore::publishHaSensor(const char *component, const char *objectId, con
                                    const char *entityCategory, const char *payloadOn, const char *payloadOff,
                                    int expireAfterSec, const char *availabilityTopicOverride)
 {
+  // Let the active car suppress telemetry it never provides, so those entities
+  // are neither registered nor published. The decision lives in the car
+  // implementation; this common code stays car-agnostic.
+  if (carInterface != nullptr && !carInterface->supportsHaTelemetry(objectId))
+  {
+    return;
+  }
+
   const char *rawTopic = liveData->settings.mqttPubTopic;
   const char *baseTopic = (strlen(rawTopic) > 0) ? rawTopic : "evdash";
   const char *rawId = (strlen(liveData->settings.mqttId) > 0) ? liveData->settings.mqttId :

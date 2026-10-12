@@ -68,6 +68,33 @@ namespace
 } // namespace
 
 /**
+   HA MQTT telemetry fields the Xpeng parser never populates. These DIDs are
+   absent from the command queue or have no parse path, so the corresponding
+   entities would sit unavailable or publish a misleading sentinel constant.
+   Reporting them unsupported makes the common publisher skip them entirely.
+*/
+bool CarXpeng::supportsHaTelemetry(const char *objectId)
+{
+  static const char *const unsupported[] = {
+      "inverter_temp",      // DID 220325 is slow-charge temp 2, not inverter temp
+      "aux_current",        // auxCurrentAmp never parsed
+      "consumption",        // batPowerKwh100 never parsed
+      "avg_speed",          // avgSpeedKmh never computed (would publish 0)
+      "outdoor_temp",       // outdoorTemperature never parsed (would publish -100)
+      "tire_pressure_fl",   // TPMS not read on Xpeng
+      "tire_pressure_fr",
+      "tire_pressure_rl",
+      "tire_pressure_rr",
+  };
+  for (const char *u : unsupported)
+  {
+    if (strcmp(objectId, u) == 0)
+      return false;
+  }
+  return true;
+}
+
+/**
    activateCommandQueue
 */
 void CarXpeng::activateCommandQueue()
