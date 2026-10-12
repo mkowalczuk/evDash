@@ -149,6 +149,8 @@ void CarXpeng::activateCommandQueue()
       "220318", // Rear Motor RPM
       "220319", // Front Motor Torque Request (Nm)
       "22031A", // Rear Motor Torque Request (Nm)
+      "22031F", // DC Fast Charge Current (A)
+      "220320", // DC Fast Charge Voltage (V)
       "220321", // Brake Main Cylinder Pressure (bar)
       "220322", // DC Fast Charge Inlet Temp 1 (°C)
       "220323", // DC Fast Charge Inlet Temp 2 (°C)
