@@ -3105,7 +3105,9 @@ bool BoardCore::netSendData(bool sendAbrp)
 
     jsonData["utc"] = liveData->params.currentTime;
     jsonData["soc"] = liveData->params.socPerc;
-    jsonData["power"] = abrpPowerKw;
+    // Only emit power when the raw reading is valid; batPowerKw sentinel is -1000.
+    if (liveData->params.batPowerKw > -900.0f)
+      jsonData["power"] = abrpPowerKw;
     jsonData["is_parked"] = (liveData->params.parkModeOrNeutral) ? 1 : 0;
     if (liveData->params.speedKmhGPS > 0)
     {
@@ -3138,16 +3140,25 @@ bool BoardCore::netSendData(bool sendAbrp)
       jsonData["tire_pressure_rr"] = liveData->params.tireRearRightPressureBar * 100.0f;
 
     jsonData["capacity"] = liveData->params.batteryTotalAvailableKWh;
-    jsonData["kwh_charged"] = liveData->params.cumulativeEnergyChargedKWh;
-    jsonData["soh"] = liveData->params.sohPerc;
-    jsonData["ext_temp"] = liveData->params.outdoorTemperature;
+    // Guard sentinel values so ABRP is not fed wrong data for fields the car
+    // did not provide (e.g. outdoor temp -100, SoH -1). ABRP treats an omitted
+    // field as unknown, which is correct; a sentinel would corrupt its model.
+    if (liveData->params.cumulativeEnergyChargedKWh >= 0)
+      jsonData["kwh_charged"] = liveData->params.cumulativeEnergyChargedKWh;
+    if (liveData->params.sohPerc >= 0)
+      jsonData["soh"] = liveData->params.sohPerc;
+    if (liveData->params.outdoorTemperature > -90.0f)
+      jsonData["ext_temp"] = liveData->params.outdoorTemperature;
     if (liveData->params.indoorTemperature != -100)
     {
       jsonData["cabin_temp"] = liveData->params.indoorTemperature;
     }
-    jsonData["batt_temp"] = liveData->params.batMinC;
-    jsonData["voltage"] = liveData->params.batVoltage;
-    jsonData["current"] = abrpCurrentA;
+    if (liveData->params.batMinC > -90.0f)
+      jsonData["batt_temp"] = liveData->params.batMinC;
+    if (liveData->params.batVoltage > 0)
+      jsonData["voltage"] = liveData->params.batVoltage;
+    if (liveData->params.batPowerAmp > -900.0f)
+      jsonData["current"] = abrpCurrentA;
     if (liveData->params.odoKm > 0)
       jsonData["odometer"] = liveData->params.odoKm;
 
