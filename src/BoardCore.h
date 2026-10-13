@@ -179,6 +179,9 @@ protected:
   void handleWebLogView(WebServer &server);
   void handleWebLogDelete(WebServer &server);
   void publishHomeAssistantDiscovery();
+  // Publishes the per-subsystem diagnostic status strings (comm/wifi/modem/
+  // sdcard) to their HA topics. Called from the periodic heartbeat only.
+  void publishDiagnosticStatus();
   void publishHaSensor(const char *component, const char *objectId, const char *name,
                        const char *deviceClass, const char *unit, const char *stateClass,
                        const char *entityCategory = nullptr, const char *payloadOn = nullptr, const char *payloadOff = nullptr,
@@ -190,6 +193,22 @@ protected:
   // When true, netSendData() skips the artificial/periodic heartbeat block and
   // publishes only live car telemetry — used by the instant-update path.
   bool mqttInstantMode = false;
+  // Per-field cache of the last value published in instant mode, keyed by the
+  // ha:: object_id POINTER (those are stable constexpr constants, so pointer
+  // identity is a valid key). Instant updates skip a field whose formatted value
+  // is unchanged, so a fresh CAN frame does not re-publish every constant. The
+  // periodic heartbeat still republishes everything (it ignores this cache) so
+  // HA's expire_after does not drop values.
+  static constexpr uint8_t kInstantCacheSize = 48;
+  struct InstantCacheEntry
+  {
+    const char *key = nullptr; // ha:: object_id pointer
+    char value[48] = {0};      // last published formatted value (fits diag strings)
+  };
+  InstantCacheEntry instantCache[kInstantCacheSize];
+  // Returns true if `formatted` differs from the cached value for objectId (and
+  // updates the cache). Returns true for unknown keys / full cache (publish).
+  bool instantValueChanged(const char *objectId, const char *formatted);
   uint32_t lastInstantPublishMs = 0;
   time_t lastInstantCanbusResponseTime = 0;
   uint32_t lastMqttGpsPublishMs = 0;

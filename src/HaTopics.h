@@ -77,4 +77,10 @@ namespace ha
   constexpr const char *CAR_CONNECTED = "car_connected";
   constexpr const char *WIFI_RSSI = "wifi_rssi";
   constexpr const char *UPTIME = "uptime";
+  // Per-subsystem diagnostic status (short text), published on the periodic
+  // heartbeat only. comm covers the active car link (BLE or CAN).
+  constexpr const char *DIAG_COMM = "diag_comm";
+  constexpr const char *DIAG_WIFI = "diag_wifi";
+  constexpr const char *DIAG_MODEM = "diag_modem";
+  constexpr const char *DIAG_SDCARD = "diag_sdcard";
 } // namespace ha

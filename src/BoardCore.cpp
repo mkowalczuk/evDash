@@ -2721,6 +2721,15 @@ void BoardCore::publishHomeAssistantDiscovery()
   publishHaSensor("binary_sensor", ha::CAR_CONNECTED, "Car Connected", "connectivity", nullptr, nullptr, "diagnostic", "1", "0");
   publishHaSensor("sensor", ha::WIFI_RSSI, "WiFi Signal", "signal_strength", "dBm", "measurement", "diagnostic");
   publishHaSensor("sensor", ha::UPTIME, "Uptime", "duration", "s", "measurement", "diagnostic");
+  // Per-subsystem status text (diagnostic category). comm = active car link
+  // (BLE/CAN). The modem entity is only registered on boards that have one.
+  publishHaSensor("sensor", ha::DIAG_COMM, "Adapter Link", nullptr, nullptr, nullptr, "diagnostic");
+  publishHaSensor("sensor", ha::DIAG_WIFI, "WiFi Status", nullptr, nullptr, nullptr, "diagnostic");
+  if (modemStatusText().length() > 0)
+  {
+    publishHaSensor("sensor", ha::DIAG_MODEM, "Modem Status", nullptr, nullptr, nullptr, "diagnostic");
+  }
+  publishHaSensor("sensor", ha::DIAG_SDCARD, "SD Card Status", nullptr, nullptr, nullptr, "diagnostic");
 
   // Done accumulating; serialize and publish the single retained device message.
   haComponentsAccumulator = nullptr;
@@ -2752,6 +2761,138 @@ void BoardCore::publishHomeAssistantDiscovery()
 
   syslog->info(DEBUG_NET, String("HA discovery: published ") + len + " bytes in 1 message (" +
                               (ok ? "OK" : "FAILED") + ")");
+}
+
+/**
+ * Instant-update de-duplication. Compares the formatted value for objectId
+ * against the last one published in instant mode. Returns true (and updates the
+ * cache) when it changed or is new; returns false when identical, so the caller
+ * can skip re-publishing an unchanged value on every CAN frame. Keyed by the
+ * ha:: object_id pointer (stable constexpr constants).
+ */
+bool BoardCore::instantValueChanged(const char *objectId, const char *formatted)
+{
+  int freeSlot = -1;
+  for (uint8_t i = 0; i < kInstantCacheSize; i++)
+  {
+    if (instantCache[i].key == objectId)
+    {
+      if (strncmp(instantCache[i].value, formatted, sizeof(instantCache[i].value)) == 0)
+      {
+        return false; // unchanged
+      }
+      strncpy(instantCache[i].value, formatted, sizeof(instantCache[i].value) - 1);
+      instantCache[i].value[sizeof(instantCache[i].value) - 1] = '\0';
+      return true;
+    }
+    if (freeSlot < 0 && instantCache[i].key == nullptr)
+    {
+      freeSlot = i;
+    }
+  }
+  // New key: record it if there is room; if the cache is full, publish anyway.
+  if (freeSlot >= 0)
+  {
+    instantCache[freeSlot].key = objectId;
+    strncpy(instantCache[freeSlot].value, formatted, sizeof(instantCache[freeSlot].value) - 1);
+    instantCache[freeSlot].value[sizeof(instantCache[freeSlot].value) - 1] = '\0';
+  }
+  return true;
+}
+
+/**
+ * Compose and publish the per-subsystem diagnostic status strings. These are
+ * device status (not car telemetry). Each string is published only when it
+ * changes (via the instant-update cache), so it can be called frequently —
+ * including on the instant-update path — without flooding the broker.
+ */
+void BoardCore::publishDiagnosticStatus()
+{
+  if (mqttClient == nullptr || !mqttClient->connected())
+  {
+    return;
+  }
+  const char *topic = liveData->settings.mqttPubTopic;
+
+  // Publish helper: only send when the string changed since last time. Uses the
+  // same change-cache as instant telemetry (keyed by the ha:: object_id).
+  auto pubDiag = [&](const char *objectId, const char *value) {
+    if (!instantValueChanged(objectId, value)) return;
+    char suffix[48];
+    snprintf(suffix, sizeof(suffix), "/%s", objectId);
+    publishMqttString(*mqttClient, topic, suffix, value);
+  };
+
+  // Adapter link (BLE or CAN — comm type is exclusive).
+  String comm;
+  if (liveData->settings.commType == COMM_TYPE_OBD2_BLE4)
+  {
+    comm = liveData->commConnected ? "BLE connected" : "BLE connecting";
+  }
+  else if (liveData->settings.commType == COMM_TYPE_CAN_COMMU)
+  {
+    comm = liveData->commConnected ? "CAN connected" : "CAN connecting";
+    if (commInterface != nullptr)
+    {
+      const String cs = commInterface->getConnectStatus();
+      if (cs.length() > 0)
+        comm = String("CAN: ") + cs;
+    }
+  }
+  else
+  {
+    comm = "none";
+  }
+  if (liveData->params.stopCommandQueue)
+  {
+    comm += " (parked/stopped)";
+  }
+  pubDiag(ha::DIAG_COMM, comm.c_str());
+
+  // WiFi.
+  String wifi;
+  if (liveData->params.wifiApMode)
+  {
+    wifi = "AP mode";
+  }
+  else if (WiFi.status() == WL_CONNECTED)
+  {
+    wifi = String("connected (") + WiFi.SSID() + ", " + WiFi.RSSI() + " dBm)";
+  }
+  else if (liveData->settings.wifiEnabled == 1)
+  {
+    wifi = "disconnected";
+  }
+  else
+  {
+    wifi = "off";
+  }
+  pubDiag(ha::DIAG_WIFI, wifi.c_str());
+
+  // Modem (board-specific; empty means no modem on this board).
+  const String modem = modemStatusText();
+  if (modem.length() > 0)
+  {
+    pubDiag(ha::DIAG_MODEM, modem.c_str());
+  }
+
+  // SD card.
+  String sd;
+  if (liveData->settings.sdcardEnabled != 1)
+  {
+    sd = "disabled";
+  }
+  else if (!liveData->params.sdcardInit)
+  {
+    sd = "not present";
+  }
+  else
+  {
+    sd = liveData->params.sdcardRecording ? "recording" : "mounted";
+  }
+  pubDiag(ha::DIAG_SDCARD, sd.c_str());
+
+  mqttClient->loop();
 }
 
 /**
@@ -2880,6 +3021,10 @@ bool BoardCore::netSendData(bool sendAbrp)
         if (ensureMqttConnected())
         {
           bool published = true;
+          // Per-subsystem diagnostic statuses (device status, not car telemetry).
+          // Change-only, so it is safe to run on every send — including instant
+          // updates — surfacing a subsystem change promptly without flooding.
+          publishDiagnosticStatus();
           // Device & connection heartbeat (always sent when connected to MQTT
           // broker, EXCEPT on an instant-update pass — those are triggered by a
           // fresh car reading and must not republish artificial/periodic values
@@ -2909,15 +3054,24 @@ bool BoardCore::netSendData(bool sendAbrp)
             };
             auto pubF = [&](const char *objectId, float value, uint8_t precision = 2, bool retain = false) {
               if (!carPublishes(objectId)) return;
-              char suffix[48];
-              snprintf(suffix, sizeof(suffix), "/%s", objectId);
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, suffix, value, precision, retain);
+              char tmpVal[20];
+              dtostrf(value, 1, precision, tmpVal);
+              // In instant mode, skip fields whose formatted value is unchanged
+              // since the last publish, so a fresh CAN frame does not re-publish
+              // every constant. Periodic sends ignore the cache (always publish).
+              if (mqttInstantMode && !instantValueChanged(objectId, tmpVal)) return;
+              char topic[80];
+              snprintf(topic, sizeof(topic), "%s/%s", liveData->settings.mqttPubTopic, objectId);
+              published &= mqttClient->publish(topic, tmpVal, retain);
             };
             auto pubI = [&](const char *objectId, int32_t value) {
               if (!carPublishes(objectId)) return;
-              char suffix[48];
-              snprintf(suffix, sizeof(suffix), "/%s", objectId);
-              published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, suffix, value);
+              char tmpVal[16];
+              snprintf(tmpVal, sizeof(tmpVal), "%ld", static_cast<long>(value));
+              if (mqttInstantMode && !instantValueChanged(objectId, tmpVal)) return;
+              char topic[80];
+              snprintf(topic, sizeof(topic), "%s/%s", liveData->settings.mqttPubTopic, objectId);
+              published &= mqttClient->publish(topic, tmpVal, false);
             };
 
             pubF(ha::SOC, liveData->params.socPerc, 2, true);

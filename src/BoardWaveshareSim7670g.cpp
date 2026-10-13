@@ -336,6 +336,28 @@ void BoardWaveshareSim7670g::initGPS()
   modem.send("AT+CGNSSPORTSWITCH=0,1", 1000);
 }
 
+String BoardWaveshareSim7670g::modemStatusText()
+{
+  if (!modem.responding())
+  {
+    return "not responding";
+  }
+  if (liveData->settings.modemEnabled != 1)
+  {
+    return "off (data disabled)";
+  }
+  if (modem.dataReady())
+  {
+    String s = "data ready";
+    const int rssi = modem.info().rssiDbm;
+    if (rssi != 0)
+      s += String(" (") + rssi + " dBm)";
+    return s;
+  }
+  // Responding but no data link yet — report the driver's state machine phase.
+  return String(modem.stateName());
+}
+
 void BoardWaveshareSim7670g::showGps()
 {
   BoardCore::showGps();

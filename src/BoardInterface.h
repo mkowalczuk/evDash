@@ -64,6 +64,11 @@ public:
   virtual bool ensureMqttConnected() { return false; }
   virtual void disconnectMqtt(bool sendOfflineStatus = false) {}
   virtual void publishHomeAssistantDiscovery() {}
+  // Short human-readable modem/cellular status for the HA diagnostics entity
+  // (e.g. "data ready", "registered", "off"). Empty string = this board has no
+  // modem, so the modem diagnostic entity is omitted. Boards with a modem
+  // override this.
+  virtual String modemStatusText() { return String(); }
   // Web log server (non-blocking HTTP server for SD logs). Boards with SD + WiFi
   // override these in BoardCore; the no-op defaults keep BoardInterface callable.
   virtual bool startWebLogServer() { return false; }

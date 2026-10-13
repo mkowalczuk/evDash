@@ -52,6 +52,7 @@ public:
     total = SD_MMC.totalBytes();
     used = SD_MMC.usedBytes();
   }
+  String modemStatusText() override;
   void initBoard() override;
   void commLoop() override;
   void boardLoop() override;
