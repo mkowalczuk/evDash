@@ -44,6 +44,9 @@ public:
   const char *hardwareModelName() override { return "Sim7670G"; }
   uint8_t hardwareIdTag() const override { return 0x04U; }
   bool sdBegin() override;
+  bool sdcardMount() override;
+  void sdcardToggleRecording() override;
+  fs::FS &boardFilesystem() override { return SD_MMC; }
   void initBoard() override;
   void commLoop() override;
   void boardLoop() override;
@@ -61,6 +64,7 @@ public:
   void ntpSync() override;
 
 private:
+  bool startSdConsoleLog();
   void checkPinConflicts();
   // Opens the AT UART and hands it to the modem driver. The driver probes the
   // modem from the main loop, so boot does not wait for it to answer.

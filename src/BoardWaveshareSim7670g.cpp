@@ -1,6 +1,7 @@
 #include "BoardWaveshareSim7670g.h"
 #include "LogSerial.h"
 #include "config.h"
+#include "BoardShared.h"
 #include <Wire.h>
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -56,6 +57,18 @@ void BoardWaveshareSim7670g::initBoard()
 void BoardWaveshareSim7670g::afterSetup()
 {
   BoardInterface::afterSetup();
+
+  // SD card (TF slot over SD_MMC). Mount if enabled, then auto-start recording
+  // and/or console logging per settings — the headless equivalent of the M5
+  // boot path.
+  if (liveData->settings.sdcardEnabled == 1)
+  {
+    if (sdcardMount() && liveData->settings.sdcardAutstartLog == 1)
+    {
+      syslog->println("Toggle recording on SD card");
+      sdcardToggleRecording();
+    }
+  }
 
   // Apply the cellular data-connection gate based on policy + modemHoldData,
   // then set up preferred/fallback failover. The modem (and GNSS) stay powered
@@ -447,12 +460,154 @@ bool BoardWaveshareSim7670g::sdBegin()
   {
     return false;
   }
-  bool ok = SD_MMC.begin("/sdcard", false);
+  // 1-bit mode: setPins() above wires only CLK/CMD/D0, so begin() must request
+  // 1-bit (mode1bit=true). Passing false asks for 4-bit (D1-D3), which were
+  // never assigned, and the mount fails.
+  bool ok = SD_MMC.begin("/sdcard", true);
   if (!ok)
   {
     return false;
   }
   return true;
+}
+
+/**
+ * Mount the TF card over SD_MMC and bring up SD-backed features. Mirrors the
+ * M5 Board320_240::sdcardMount() but uses the SD_MMC backend this board wires
+ * the card to, and points the console logger at the same filesystem.
+ */
+bool BoardWaveshareSim7670g::sdcardMount()
+{
+  if (liveData->params.sdcardInit)
+  {
+    return true;
+  }
+
+  syslog->print("Initializing SD card (SD_MMC)...");
+  if (!sdBegin())
+  {
+    syslog->println(" failed");
+    return false;
+  }
+
+  uint8_t cardType = SD_MMC.cardType();
+  if (cardType == CARD_NONE)
+  {
+    syslog->println(" no card attached");
+    return false;
+  }
+
+  liveData->params.sdcardInit = true;
+  const char *typeStr = (cardType == CARD_MMC) ? "MMC" : (cardType == CARD_SD) ? "SDSC" : (cardType == CARD_SDHC) ? "SDHC" : "UNKNOWN";
+  syslog->printf(" found (%s, %lluMB)\n", typeStr, SD_MMC.cardSize() / (1024ULL * 1024ULL));
+
+  // Route the console logger to this card, then start console logging if enabled.
+  syslog->setSdFilesystem(SD_MMC);
+  if (liveData->settings.sdcardConsoleLogEnabled == 1 && !syslog->isSdLogging())
+  {
+    startSdConsoleLog();
+  }
+  return true;
+}
+
+/**
+ * Toggle SD telemetry recording on/off, flushing any buffered data on stop.
+ * Mirrors the M5 Board320_240::sdcardToggleRecording() against SD_MMC.
+ */
+void BoardWaveshareSim7670g::sdcardToggleRecording()
+{
+  if (!liveData->params.sdcardInit)
+  {
+    return;
+  }
+
+  syslog->println("Toggle SD card recording...");
+  liveData->params.sdcardRecording = !liveData->params.sdcardRecording;
+  if (liveData->params.sdcardRecording)
+  {
+    liveData->params.sdcardCanNotify = true;
+    liveData->params.sdcardLastFlushMs = millis();
+    lastContributeSdRecordTime = 0;
+  }
+  else
+  {
+    if (sdcardRecordBuffer.length() > 0 && strlen(liveData->params.sdcardFilename) != 0)
+    {
+      if (rotateSdV2FileIfNeeded(boardFilesystem(), liveData->params.sdcardFilename,
+                                 sizeof(liveData->params.sdcardFilename),
+                                 sdcardRecordBuffer.length()))
+      {
+        syslog->print("SD v2 rollover file: ");
+        syslog->println(liveData->params.sdcardFilename);
+      }
+      File file = boardFilesystem().open(liveData->params.sdcardFilename, FILE_APPEND);
+      if (!file)
+      {
+        file = boardFilesystem().open(liveData->params.sdcardFilename, FILE_WRITE);
+      }
+      if (file)
+      {
+        file.print(sdcardRecordBuffer);
+        file.close();
+      }
+      sdcardRecordBuffer = "";
+    }
+    liveData->params.sdcardFilename[0] = '\0';
+  }
+}
+
+/**
+ * Start console logging to /logs/<timestamp>.log on the SD_MMC card.
+ * Headless equivalent of Board320_240::startSdcardConsoleLog().
+ */
+bool BoardWaveshareSim7670g::startSdConsoleLog()
+{
+  if (!liveData->params.sdcardInit && !sdcardMount())
+  {
+    return false;
+  }
+  if (syslog->isSdLogging())
+  {
+    return true;
+  }
+  if (!SD_MMC.exists("/logs"))
+  {
+    SD_MMC.mkdir("/logs");
+  }
+
+  char logPath[64];
+  struct tm nowTm;
+  if (!getLocalTime(&nowTm, 0))
+  {
+    memset(&nowTm, 0, sizeof(nowTm));
+    nowTm.tm_year = 70; // 1970 until time is set
+    nowTm.tm_mday = 1;
+  }
+  strftime(logPath, sizeof(logPath), "/logs/%Y-%m-%d_%H_%M_%S.log", &nowTm);
+  if (SD_MMC.exists(logPath))
+  {
+    for (int i = 1; i < 100; i++)
+    {
+      char candidate[72];
+      snprintf(candidate, sizeof(candidate), "/logs/%04d-%02d-%02d_%02d_%02d_%02d_%d.log",
+               nowTm.tm_year + 1900, nowTm.tm_mon + 1, nowTm.tm_mday,
+               nowTm.tm_hour, nowTm.tm_min, nowTm.tm_sec, i);
+      if (!SD_MMC.exists(candidate))
+      {
+        strncpy(logPath, candidate, sizeof(logPath) - 1);
+        logPath[sizeof(logPath) - 1] = '\0';
+        break;
+      }
+    }
+  }
+
+  if (syslog->startSdLogging(logPath))
+  {
+    syslog->printf("Started SD console logging to %s\n", logPath);
+    return true;
+  }
+  syslog->printf("Failed to start SD console logging to %s\n", logPath);
+  return false;
 }
 
 void BoardWaveshareSim7670g::ntpSync()

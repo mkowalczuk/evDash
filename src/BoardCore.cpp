@@ -278,7 +278,7 @@ void BoardCore::mainLoop()
       if ((timeToFlush || sizeToFlush) && sdcardRecordBuffer.length() > 0)
       {
         if (sdcardJsonV2 &&
-            rotateSdV2FileIfNeeded(liveData->params.sdcardFilename,
+            rotateSdV2FileIfNeeded(boardFilesystem(), liveData->params.sdcardFilename,
                                    sizeof(liveData->params.sdcardFilename),
                                    sdcardRecordBuffer.length()))
         {
@@ -286,11 +286,12 @@ void BoardCore::mainLoop()
           syslog->println(liveData->params.sdcardFilename);
         }
 
-        File file = SD.open(liveData->params.sdcardFilename, FILE_APPEND);
+        fs::FS &fs = boardFilesystem();
+        File file = fs.open(liveData->params.sdcardFilename, FILE_APPEND);
         if (!file)
         {
           syslog->println("Failed to open file for appending");
-          file = SD.open(liveData->params.sdcardFilename, FILE_WRITE);
+          file = fs.open(liveData->params.sdcardFilename, FILE_WRITE);
         }
         if (!file)
         {
@@ -3611,11 +3612,12 @@ void BoardCore::queueAbrpSdLog(const char *payload, size_t length, time_t curren
     return;
   }
 
-  File file = SD.open(liveData->params.sdcardAbrpFilename, FILE_APPEND);
+  fs::FS &fs = boardFilesystem();
+  File file = fs.open(liveData->params.sdcardAbrpFilename, FILE_APPEND);
   if (!file)
   {
     syslog->info(DEBUG_SDCARD, "Failed to open ABRP file for appending");
-    file = SD.open(liveData->params.sdcardAbrpFilename, FILE_WRITE);
+    file = fs.open(liveData->params.sdcardAbrpFilename, FILE_WRITE);
   }
   if (!file)
   {
@@ -3717,7 +3719,7 @@ bool BoardCore::ensureSdV2UploadFileSelected(const String &activeLogFilename)
     return true;
   }
 
-  File dir = SD.open("/");
+  File dir = boardFilesystem().open("/");
   if (!dir || !dir.isDirectory())
   {
     if (dir)
@@ -3779,17 +3781,17 @@ bool BoardCore::processSdV2UploadChunk()
     bool renamed = false;
     if (uploadedPath.length() > 0)
     {
-      if (SD.exists(uploadedPath.c_str()))
+      if (boardFilesystem().exists(uploadedPath.c_str()))
       {
-        SD.remove(uploadedPath.c_str());
+        boardFilesystem().remove(uploadedPath.c_str());
       }
-      renamed = SD.rename(sdV2UploadFilePath.c_str(), uploadedPath.c_str());
+      renamed = boardFilesystem().rename(sdV2UploadFilePath.c_str(), uploadedPath.c_str());
     }
     resetSdV2UploadState();
     return renamed;
   };
 
-  File file = SD.open(sdV2UploadFilePath.c_str(), FILE_READ);
+  File file = boardFilesystem().open(sdV2UploadFilePath.c_str(), FILE_READ);
   if (!file || file.isDirectory())
   {
     if (file)
@@ -4004,7 +4006,7 @@ bool BoardCore::cleanupUploadedSdV2Logs()
     return false;
   }
 
-  File dir = SD.open("/");
+  File dir = boardFilesystem().open("/");
   if (!dir || !dir.isDirectory())
   {
     if (dir)
@@ -4056,7 +4058,7 @@ bool BoardCore::cleanupUploadedSdV2Logs()
       continue;
     }
 
-    if (SD.remove(filePath.c_str()))
+    if (boardFilesystem().remove(filePath.c_str()))
     {
       removedAny = true;
     }
@@ -4433,7 +4435,7 @@ void BoardCore::uploadSdCardLogToEvDashServer(bool silent)
       return false;
     }
 
-    if (rotateSdV2FileIfNeeded(liveData->params.sdcardFilename,
+    if (rotateSdV2FileIfNeeded(boardFilesystem(), liveData->params.sdcardFilename,
                                sizeof(liveData->params.sdcardFilename),
                                sdcardRecordBuffer.length()))
     {
@@ -4441,11 +4443,11 @@ void BoardCore::uploadSdCardLogToEvDashServer(bool silent)
       syslog->println(liveData->params.sdcardFilename);
     }
 
-    File file = SD.open(liveData->params.sdcardFilename, FILE_APPEND);
+    File file = boardFilesystem().open(liveData->params.sdcardFilename, FILE_APPEND);
     if (!file)
     {
       syslog->println("Failed to open file for appending");
-      file = SD.open(liveData->params.sdcardFilename, FILE_WRITE);
+      file = boardFilesystem().open(liveData->params.sdcardFilename, FILE_WRITE);
     }
     if (!file)
     {
@@ -4466,7 +4468,7 @@ void BoardCore::uploadSdCardLogToEvDashServer(bool silent)
     syslog->println("Upload logs: active SD buffer flush failed");
   }
 
-  File dir = SD.open("/");
+  File dir = boardFilesystem().open("/");
   if (!dir || !dir.isDirectory())
   {
     if (dir)
@@ -4552,7 +4554,7 @@ void BoardCore::uploadSdCardLogToEvDashServer(bool silent)
 
     uint32_t part = 0;
     uint32_t uploaded = 0;
-    File uploadFileMeta = SD.open(filePath.c_str(), FILE_READ);
+    File uploadFileMeta = boardFilesystem().open(filePath.c_str(), FILE_READ);
     const size_t totalSize = uploadFileMeta ? static_cast<size_t>(uploadFileMeta.size()) : 0U;
     bool uploadFailed = false;
     if (!uploadFileMeta || uploadFileMeta.isDirectory())
@@ -4571,7 +4573,7 @@ void BoardCore::uploadSdCardLogToEvDashServer(bool silent)
       {
         const size_t remaining = totalSize - uploaded;
         const size_t bytesToRead = (remaining < manualChunkSize) ? remaining : manualChunkSize;
-        File uploadChunk = SD.open(filePath.c_str(), FILE_READ);
+        File uploadChunk = boardFilesystem().open(filePath.c_str(), FILE_READ);
         if (!uploadChunk || uploadChunk.isDirectory())
         {
           if (uploadChunk)
@@ -4681,16 +4683,16 @@ void BoardCore::uploadSdCardLogToEvDashServer(bool silent)
         const String uploadedPath = toUploadedSdV2Path(filePath);
         if (uploadedPath.length() > 0)
         {
-          if (SD.exists(uploadedPath.c_str()))
+          if (boardFilesystem().exists(uploadedPath.c_str()))
           {
-            SD.remove(uploadedPath.c_str());
+            boardFilesystem().remove(uploadedPath.c_str());
           }
-          finalized = SD.rename(filePath.c_str(), uploadedPath.c_str());
+          finalized = boardFilesystem().rename(filePath.c_str(), uploadedPath.c_str());
         }
       }
       else
       {
-        finalized = SD.remove(filePath.c_str());
+        finalized = boardFilesystem().remove(filePath.c_str());
       }
       if (finalized)
       {

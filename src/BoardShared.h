@@ -519,7 +519,7 @@ namespace
     return true;
   }
 
-  String nextSdV2RolloverPath(const String &currentPath)
+  String nextSdV2RolloverPath(fs::FS &fs, const String &currentPath)
   {
     if (currentPath.length() == 0)
     {
@@ -557,7 +557,7 @@ namespace
     for (uint16_t seq = nextSeq; seq < 9999; seq++)
     {
       const String candidate = "/" + stem + "_" + String(seq) + "_v2.json";
-      if (!SD.exists(candidate.c_str()))
+      if (!fs.exists(candidate.c_str()))
       {
         return candidate;
       }
@@ -565,7 +565,7 @@ namespace
     return "";
   }
 
-  bool rotateSdV2FileIfNeeded(char *fileNameBuffer, size_t fileNameBufferSize, size_t pendingAppendBytes)
+  bool rotateSdV2FileIfNeeded(fs::FS &fs, char *fileNameBuffer, size_t fileNameBufferSize, size_t pendingAppendBytes)
   {
     if (fileNameBuffer == nullptr || fileNameBufferSize == 0 || pendingAppendBytes == 0)
     {
@@ -579,7 +579,7 @@ namespace
     }
 
     size_t currentSize = 0;
-    File currentFile = SD.open(currentPath.c_str(), FILE_READ);
+    File currentFile = fs.open(currentPath.c_str(), FILE_READ);
     if (currentFile && !currentFile.isDirectory())
     {
       currentSize = static_cast<size_t>(currentFile.size());
@@ -594,7 +594,7 @@ namespace
       return false;
     }
 
-    const String nextPath = nextSdV2RolloverPath(currentPath);
+    const String nextPath = nextSdV2RolloverPath(fs, currentPath);
     if (nextPath.length() == 0 || nextPath.length() >= fileNameBufferSize)
     {
       return false;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <FS.h>
+#include <SD.h>
 #include "LiveData.h"
 #include "CarInterface.h"
 #include "CommInterface.h"
@@ -89,6 +90,11 @@ public:
   // Sdcard
   virtual bool sdcardMount() { return false; };
   virtual void sdcardToggleRecording() = 0;
+  // Filesystem backing SD recording / console logging. M5 boards expose the TF
+  // card over SPI (the global `SD`); the Waveshare board uses SD_MMC. Shared
+  // recording/upload/console code goes through this instead of a hardcoded
+  // global so it works on either backend. Default: SPI SD.
+  virtual fs::FS &boardFilesystem() { return SD; }
   bool serializeParamsToJson(File file, bool inclApiKey = false);
   bool serializeParamsToJson(String &outJson, bool inclApiKey = false);
   virtual bool buildContributePayloadV2(String &outJson, bool useReadableTsForSd = false)

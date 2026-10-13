@@ -34,10 +34,10 @@ bool LogSerial::startSdLogging(const char *path)
   {
     return false;
   }
-  sdLogFile = SD.open(path, FILE_APPEND);
+  sdLogFile = sdFs->open(path, FILE_APPEND);
   if (!sdLogFile)
   {
-    sdLogFile = SD.open(path, FILE_WRITE);
+    sdLogFile = sdFs->open(path, FILE_WRITE);
   }
   if (!sdLogFile)
   {

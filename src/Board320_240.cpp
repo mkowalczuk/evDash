@@ -1323,7 +1323,7 @@ void Board320_240::sdcardToggleRecording()
   {
     if (sdcardRecordBuffer.length() > 0 && strlen(liveData->params.sdcardFilename) != 0)
     {
-      if (rotateSdV2FileIfNeeded(liveData->params.sdcardFilename,
+      if (rotateSdV2FileIfNeeded(boardFilesystem(), liveData->params.sdcardFilename,
                                  sizeof(liveData->params.sdcardFilename),
                                  sdcardRecordBuffer.length()))
       {

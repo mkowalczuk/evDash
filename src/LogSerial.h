@@ -52,6 +52,7 @@ protected:
   void pushSdBuffer(const uint8_t *buf, size_t len);
   void writeDirect(const uint8_t *buf, size_t len);
   void emitTimestampPrefix();
+  fs::FS *sdFs = &SD; // filesystem for console-log file (SPI SD by default; SD_MMC on Waveshare)
 public:
 #ifndef BOARD_M5STACK_CORES3
   LogSerial();
@@ -65,6 +66,10 @@ public:
   void setTimestampMode(uint8_t mode) { timestampMode = mode; }
   uint8_t getTimestampMode() const { return timestampMode; }
   void setWallClockSource(time_t (*fn)()) { wallClockFn = fn; }
+  // Backing filesystem for the console-log file. Defaults to SPI SD; a board
+  // with a different SD interface (e.g. Waveshare SD_MMC) sets this before
+  // startSdLogging so the log is written to the correct card.
+  void setSdFilesystem(fs::FS &fs) { sdFs = &fs; }
   bool isDebug(uint8_t aDebugLevel) const { return (debugLevel & aDebugLevel) != 0; }
   void setLogToSdcard(bool state);
   bool startSdLogging(const char *path);
