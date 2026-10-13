@@ -86,6 +86,59 @@ bool LogSerial::startSdLogging(const char *path)
 }
 
 /**
+ * Rename the active SD console log file (e.g. once wall-clock time is known so a
+ * log opened as "1970-..." gets a correct boot-time name). Flushes and closes
+ * the current file, renames it on the backing filesystem, then reopens the new
+ * path in append mode so subsequent output continues in the same file. The ring
+ * buffer is preserved. No-op if not logging, the path is unchanged, or a file
+ * already exists at the destination. Returns true on success.
+ */
+bool LogSerial::renameSdLog(const char *newPath)
+{
+  if (!logToSdcard || newPath == nullptr || newPath[0] == '\0')
+  {
+    return false;
+  }
+  if (strcmp(newPath, currentSdLogPath) == 0)
+  {
+    return false; // nothing to do
+  }
+  if (sdFs->exists(newPath))
+  {
+    return false; // don't clobber an existing file
+  }
+
+  // Flush everything buffered into the current file and close it so the rename
+  // operates on a quiescent file.
+  flushSdBuffer(0, true);
+  if (sdLogFile)
+  {
+    sdLogFile.flush();
+    sdLogFile.close();
+  }
+
+  if (!sdFs->rename(currentSdLogPath, newPath))
+  {
+    // Rename failed; reopen the original so logging continues uninterrupted.
+    sdLogFile = sdFs->open(currentSdLogPath, FILE_APPEND);
+    return false;
+  }
+
+  sdLogFile = sdFs->open(newPath, FILE_APPEND);
+  if (!sdLogFile)
+  {
+    // Reopen failed entirely; stop SD logging to avoid writing to a closed file.
+    logToSdcard = false;
+    currentSdLogPath[0] = '\0';
+    return false;
+  }
+
+  strncpy(currentSdLogPath, newPath, sizeof(currentSdLogPath) - 1);
+  currentSdLogPath[sizeof(currentSdLogPath) - 1] = '\0';
+  return true;
+}
+
+/**
  * Stop dumping console log to SD card and close file
  */
 void LogSerial::stopSdLogging()

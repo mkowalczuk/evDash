@@ -73,6 +73,9 @@ public:
   bool isDebug(uint8_t aDebugLevel) const { return (debugLevel & aDebugLevel) != 0; }
   void setLogToSdcard(bool state);
   bool startSdLogging(const char *path);
+  // Rename the active SD console log file in place (flush, close, rename,
+  // reopen-append). Used to fix a 1970 log name once wall-clock time is known.
+  bool renameSdLog(const char *newPath);
   void stopSdLogging();
   bool isSdLogging() const { return logToSdcard; }
   const char *getSdLogPath() const { return currentSdLogPath; }

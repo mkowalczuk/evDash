@@ -193,6 +193,10 @@ protected:
   time_t lastInstantCanbusResponseTime = 0;
   uint32_t lastMqttGpsPublishMs = 0;
   uint32_t lastPublishedGpsFixMs = 0;
+  // Once wall-clock time becomes known, the SD console log (which may have been
+  // opened with a 1970 name) is renamed to its real boot time. Latched so the
+  // rename is attempted only once per boot.
+  bool sdLogRenamedForWallClock = false;
   // Web log server (non-blocking; shared between display and headless boards)
   WebServer *webLogServer = nullptr;
   bool webLogServerSoftApStarted = false;

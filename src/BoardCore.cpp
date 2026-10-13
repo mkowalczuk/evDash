@@ -3456,6 +3456,34 @@ void BoardCore::netLoop()
     gpsTimeFallbackAllowed = false;
   }
 
+  // Once wall-clock time is known (from NTP, cellular NITZ/CNTP or GPS), fix an
+  // SD console log that was opened before time was set (named "1970-..."). The
+  // real boot time is wall_now - uptime; rename the log to that so logs don't
+  // accumulate under 1970 and keep appending to the corrected file. Latched so
+  // this runs at most once per boot.
+  if (!sdLogRenamedForWallClock && syslog != nullptr && syslog->isSdLogging() &&
+      liveData->params.currentTime >= 1700000000)
+  {
+    const char *curPath = syslog->getSdLogPath();
+    // Only rename logs that were opened without a valid clock (1970 names).
+    if (curPath != nullptr && strncmp(curPath, "/logs/1970", 10) == 0)
+    {
+      time_t bootEpoch = static_cast<time_t>(liveData->params.currentTime) -
+                         static_cast<time_t>(millis() / 1000U);
+      struct tm bootTm;
+      if (localtime_r(&bootEpoch, &bootTm) != nullptr)
+      {
+        char newPath[64];
+        strftime(newPath, sizeof(newPath), "/logs/%Y-%m-%d_%H_%M_%S.log", &bootTm);
+        if (syslog->renameSdLog(newPath))
+        {
+          syslog->printf("SD console log renamed to boot time: %s\n", newPath);
+        }
+      }
+    }
+    sdLogRenamedForWallClock = true; // attempt once regardless of outcome
+  }
+
   // Upload to custom API or MQTT
   uint16_t remoteInterval = liveData->settings.remoteUploadIntervalSec;
   if (remoteInterval == 0 && liveData->settings.mqttEnabled == 1)
