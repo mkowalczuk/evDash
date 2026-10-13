@@ -2390,6 +2390,51 @@ bool BoardCore::ensureMqttConnected()
   }
 }
 
+bool BoardCore::publishMqttGpsIfDue()
+{
+  if (mqttClient == nullptr || !mqttClient->connected())
+  {
+    return false;
+  }
+  if (!isGpsFixUsable(liveData))
+  {
+    return false;
+  }
+
+  // mqttGpsIntervalSec==0 => publish on every new fix (fresh gpsLastFixMs);
+  // >0 => throttle to that many seconds regardless of fix rate.
+  const uint32_t gpsIntervalMs =
+      static_cast<uint32_t>(liveData->settings.mqttGpsIntervalSec) * 1000U;
+  bool due;
+  if (gpsIntervalMs == 0)
+  {
+    due = (lastPublishedGpsFixMs != liveData->params.gpsLastFixMs);
+  }
+  else
+  {
+    due = (lastMqttGpsPublishMs == 0) ||
+          ((millis() - lastMqttGpsPublishMs) >= gpsIntervalMs);
+  }
+  if (!due)
+  {
+    return false;
+  }
+
+  lastMqttGpsPublishMs = millis();
+  lastPublishedGpsFixMs = liveData->params.gpsLastFixMs;
+
+  bool published = true;
+  published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_lat", liveData->params.gpsLat, 5);
+  published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_lon", liveData->params.gpsLon, 5);
+  published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_speed", liveData->params.speedKmhGPS);
+  published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_alt", liveData->params.gpsAlt);
+  if (liveData->params.gpsHeadingDeg >= 0)
+  {
+    published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_heading", liveData->params.gpsHeadingDeg);
+  }
+  return published;
+}
+
 void BoardCore::publishHaSensor(const char *component, const char *objectId, const char *name,
                                    const char *deviceClass, const char *unit, const char *stateClass,
                                    const char *entityCategory, const char *payloadOn, const char *payloadOff,
@@ -3018,19 +3063,10 @@ bool BoardCore::netSendData(bool sendAbrp)
             }
           }
 
-          // Send GPS data via GPRS (if enabled && valid)
-          if (isGpsFixUsable(liveData))
-          {
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_lat", liveData->params.gpsLat, 5);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_lon", liveData->params.gpsLon, 5);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_speed", liveData->params.speedKmhGPS);
-            published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_alt", liveData->params.gpsAlt);
-
-            if (liveData->params.gpsHeadingDeg >= 0)
-            {
-              published &= publishMqttFloat(*mqttClient, liveData->settings.mqttPubTopic, "/gps_heading", liveData->params.gpsHeadingDeg);
-            }
-          }
+          // Send GPS data (if enabled && valid). Delegated to the shared helper
+          // so the interval/throttle logic matches the standalone GPS tick in
+          // netLoop(); mqttGpsIntervalSec==0 publishes on every new fix.
+          published &= publishMqttGpsIfDue();
           rc = published ? 200 : -1;
           if (mqttClient != nullptr && mqttClient->connected())
           {
@@ -3465,6 +3501,22 @@ void BoardCore::netLoop()
       int64_t endTime = esp_timer_get_time();
       lastNetSendDurationMs = static_cast<uint32_t>((endTime - startTime) / 1000);
       syslog->info(DEBUG_NET, String("MQTT instant update took ") + lastNetSendDurationMs + " ms");
+    }
+  }
+
+  // Standalone GPS publish tick. GPS fixes arrive on their own cadence (~1 Hz)
+  // independent of the car-telemetry send, so publish them here rather than
+  // only riding along with a periodic/instant send. mqttGpsIntervalSec==0
+  // publishes on every new fix; >0 throttles. The shared lastMqttGpsPublishMs
+  // timestamp keeps this from double-publishing with netSendData().
+  if (netReady && liveData->settings.mqttEnabled == 1 && isGpsFixUsable(liveData))
+  {
+    if (ensureMqttConnected())
+    {
+      if (publishMqttGpsIfDue() && mqttClient != nullptr && mqttClient->connected())
+      {
+        mqttClient->loop();
+      }
     }
   }
 

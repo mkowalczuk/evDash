@@ -353,6 +353,8 @@ void BoardInterface::loadSettings()
   // v38
   liveData->settings.logTimestampMode = 0;   // off by default
   liveData->settings.mqttInstantUpdates = 0; // off by default
+  // v39
+  liveData->settings.mqttGpsIntervalSec = 0; // 0 = publish GPS with every MQTT send
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -640,9 +642,14 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 37)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 38;
         liveData->tmpSettings.logTimestampMode = 0;
         liveData->tmpSettings.mqttInstantUpdates = 0;
+      }
+      if (liveData->tmpSettings.settingsVersion == 38)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.mqttGpsIntervalSec = 0;
       }
 
       // Save upgraded structure
@@ -1008,6 +1015,10 @@ bool BoardInterface::customConsoleCommand(String cmd)
     syslog->printf("  interval: %u sec%s\n",
                    liveData->settings.remoteUploadIntervalSec,
                    (liveData->settings.remoteUploadIntervalSec == 0) ? " (auto 60s)" : "");
+    syslog->printf("  instant:  %s\n", (liveData->settings.mqttInstantUpdates == 1) ? "ON (publish on car update)" : "OFF");
+    syslog->printf("  gpsInterval: %u sec%s\n",
+                   liveData->settings.mqttGpsIntervalSec,
+                   (liveData->settings.mqttGpsIntervalSec == 0) ? " (every send)" : "");
     syslog->printf("  homeassistant: %s\n", (liveData->settings.mqttHomeAssistant == 1) ? "ON" : "OFF");
     return true;
   }
@@ -2648,7 +2659,7 @@ bool BoardInterface::customConsoleCommand(String cmd)
   }
 
   // Instant MQTT updates (publish car values as soon as they change)
-  if (key.equalsIgnoreCase("mqttInstant") || key.equalsIgnoreCase("mqttInstantUpdates"))
+  if (key.equalsIgnoreCase("mqttInstantUpdates"))
   {
     if (isSetter)
     {
@@ -2657,7 +2668,7 @@ bool BoardInterface::customConsoleCommand(String cmd)
       {
         liveData->settings.mqttInstantUpdates = b;
         saveSettings();
-        syslog->printf("mqttInstant set to: %s\n", (liveData->settings.mqttInstantUpdates == 1) ? "ON (1)" : "OFF (0)");
+        syslog->printf("mqttInstantUpdates set to: %s\n", (liveData->settings.mqttInstantUpdates == 1) ? "ON (1)" : "OFF (0)");
       }
       else
       {
@@ -2666,7 +2677,27 @@ bool BoardInterface::customConsoleCommand(String cmd)
     }
     else
     {
-      syslog->printf("mqttInstant: %s\n", (liveData->settings.mqttInstantUpdates == 1) ? "ON (1)" : "OFF (0)");
+      syslog->printf("mqttInstantUpdates: %s\n", (liveData->settings.mqttInstantUpdates == 1) ? "ON (1)" : "OFF (0)");
+    }
+    return true;
+  }
+
+  // MQTT GPS publish interval (0 = publish with every MQTT send)
+  if (key.equalsIgnoreCase("mqttGpsInterval") || key.equalsIgnoreCase("mqttGpsIntervalSec"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.mqttGpsIntervalSec = static_cast<uint16_t>(value.toInt());
+      saveSettings();
+      syslog->printf("mqttGpsInterval set to: %u sec%s\n",
+                     liveData->settings.mqttGpsIntervalSec,
+                     (liveData->settings.mqttGpsIntervalSec == 0) ? " (every send)" : "");
+    }
+    else
+    {
+      syslog->printf("mqttGpsInterval: %u sec%s\n",
+                     liveData->settings.mqttGpsIntervalSec,
+                     (liveData->settings.mqttGpsIntervalSec == 0) ? " (every send)" : "");
     }
     return true;
   }
@@ -3474,6 +3505,8 @@ void BoardInterface::showHelp()
   syslog->println("  haName[=name]         ... get/set Home Assistant device name");
   syslog->println("  haModel[=model]       ... get/set Home Assistant device model");
   syslog->println("  mqttInterval[=sec]    ... get/set MQTT upload interval");
+  syslog->println("  mqttInstantUpdates[=0|1] ... get/set instant publish on car update");
+  syslog->println("  mqttGpsInterval[=sec] ... get/set MQTT GPS interval (0=every send)");
   syslog->println("Diagnostics & CAN:");
   syslog->println("  record=1..4           ... record CAN response buffer");
   syslog->println("  compare               ... compare CAN buffers");

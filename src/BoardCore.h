@@ -153,6 +153,12 @@ protected:
   static constexpr uint32_t kMqttReconnectBackoffMs = 15000;
   NetTransport *activeTransport() override;
   bool ensureMqttConnected();
+  // Publishes the GPS topics (lat/lon/speed/alt/heading) if a fix is usable and
+  // the configured GPS interval has elapsed. mqttGpsIntervalSec==0 publishes on
+  // every new fix; >0 throttles to that many seconds. Returns true if the
+  // topics were published this call. Used by both netSendData() and the
+  // standalone GPS tick in netLoop().
+  bool publishMqttGpsIfDue();
   void publishHomeAssistantDiscovery();
   void publishHaSensor(const char *component, const char *objectId, const char *name,
                        const char *deviceClass, const char *unit, const char *stateClass,
@@ -167,6 +173,8 @@ protected:
   bool mqttInstantMode = false;
   uint32_t lastInstantPublishMs = 0;
   time_t lastInstantCanbusResponseTime = 0;
+  uint32_t lastMqttGpsPublishMs = 0;
+  uint32_t lastPublishedGpsFixMs = 0;
   uint32_t wifiTransferredBytes = 0;
   uint32_t wifiTransferLastActivityMs = 0;
   uint32_t lastFirmwareVersionCheckMs = 0;

@@ -125,7 +125,7 @@ inline bool isCarTypeXpeng(int carType)
 #define CONTRIBUTE_READY_TO_SEND 3
 
 // Stored settings schema version. Bump only when SETTINGS_STRUC gets a persisted field.
-#define SETTINGS_VERSION_CURRENT 38
+#define SETTINGS_VERSION_CURRENT 39
 
 // BLE MAC address connection types
 #define BLE_ADDRESS_TYPE_RANDOM 0 // Random first, fallback Public
@@ -509,6 +509,8 @@ typedef struct
   // == settings version 38
   uint8_t logTimestampMode;        // 0 - off (default), 1 - ms since boot, 2 - wall clock
   uint8_t mqttInstantUpdates;      // 0 - off (default), 1 - publish car values as soon as they update
+  // == settings version 39
+  uint16_t mqttGpsIntervalSec;     // GPS publish interval over MQTT: 0 = every send (instant), >0 = throttle to N sec
   //
 } SETTINGS_STRUC;
 
