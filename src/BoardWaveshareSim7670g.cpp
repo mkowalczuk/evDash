@@ -348,14 +348,16 @@ String BoardWaveshareSim7670g::modemStatusText()
   }
   if (modem.dataReady())
   {
-    String s = "data ready";
-    const int rssi = modem.info().rssiDbm;
-    if (rssi != 0)
-      s += String(" (") + rssi + " dBm)";
-    return s;
+    // Signal strength is published separately as the modem_signal diagnostic.
+    return "data ready";
   }
   // Responding but no data link yet — report the driver's state machine phase.
   return String(modem.stateName());
+}
+
+int BoardWaveshareSim7670g::modemSignalDbm()
+{
+  return modem.info().rssiDbm; // 0 when unknown
 }
 
 void BoardWaveshareSim7670g::showGps()

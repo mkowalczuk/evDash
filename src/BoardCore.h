@@ -180,7 +180,7 @@ protected:
   void handleWebLogDelete(WebServer &server);
   void publishHomeAssistantDiscovery();
   // Publishes the per-subsystem diagnostic status strings (comm/wifi/modem/
-  // sdcard) to their HA topics. Called from the periodic heartbeat only.
+  // gps/sdcard) to their HA topics, change-only. Called on every send.
   void publishDiagnosticStatus();
   void publishHaSensor(const char *component, const char *objectId, const char *name,
                        const char *deviceClass, const char *unit, const char *stateClass,

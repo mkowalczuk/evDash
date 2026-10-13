@@ -70,6 +70,10 @@ public:
   // modem, so the modem diagnostic entity is omitted. Boards with a modem
   // override this.
   virtual String modemStatusText() { return String(); }
+  // Modem signal strength in dBm for the modem_signal diagnostic (0 = unknown /
+  // no modem). Kept separate from modemStatusText() so the status text stays
+  // stable and the signal has its own numeric sensor.
+  virtual int modemSignalDbm() { return 0; }
   // Web log server (non-blocking HTTP server for SD logs). Boards with SD + WiFi
   // override these in BoardCore; the no-op defaults keep BoardInterface callable.
   virtual bool startWebLogServer() { return false; }

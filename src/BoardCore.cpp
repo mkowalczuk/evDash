@@ -2589,6 +2589,17 @@ void BoardCore::publishHomeAssistantDiscovery()
     return;
   }
 
+  // Re-registering discovery makes HA treat every entity as new and show it as
+  // "unknown" until a state arrives. The change-only caches (diagnostics and
+  // instant telemetry) would otherwise suppress the next publish as "unchanged",
+  // leaving those entities stuck at "unknown". Clear the cache so the next send
+  // forces a fresh state for every field.
+  for (uint8_t i = 0; i < kInstantCacheSize; i++)
+  {
+    instantCache[i].key = nullptr;
+    instantCache[i].value[0] = '\0';
+  }
+
   syslog->info(DEBUG_NET, "Publishing Home Assistant MQTT discovery (device-based, single message)...");
 
   const char *rawTopic = liveData->settings.mqttPubTopic;
@@ -2728,8 +2739,10 @@ void BoardCore::publishHomeAssistantDiscovery()
   if (modemStatusText().length() > 0)
   {
     publishHaSensor("sensor", ha::DIAG_MODEM, "Modem Status", nullptr, nullptr, nullptr, "diagnostic");
+    publishHaSensor("sensor", ha::MODEM_SIGNAL, "Modem Signal", "signal_strength", "dBm", "measurement", "diagnostic");
   }
   publishHaSensor("sensor", ha::DIAG_SDCARD, "SD Card Status", nullptr, nullptr, nullptr, "diagnostic");
+  publishHaSensor("sensor", ha::DIAG_GPS, "GPS Status", nullptr, nullptr, nullptr, "diagnostic");
 
   // Done accumulating; serialize and publish the single retained device message.
   haComponentsAccumulator = nullptr;
@@ -2857,7 +2870,9 @@ void BoardCore::publishDiagnosticStatus()
   }
   else if (WiFi.status() == WL_CONNECTED)
   {
-    wifi = String("connected (") + WiFi.SSID() + ", " + WiFi.RSSI() + " dBm)";
+    // RSSI is published separately as the wifi_rssi diagnostic; keep this text
+    // to the connection state + SSID only.
+    wifi = String("connected (") + WiFi.SSID() + ")";
   }
   else if (liveData->settings.wifiEnabled == 1)
   {
@@ -2874,9 +2889,33 @@ void BoardCore::publishDiagnosticStatus()
   if (modem.length() > 0)
   {
     pubDiag(ha::DIAG_MODEM, modem.c_str());
+    // Signal strength as its own numeric field (dBm). Only publish when known.
+    const int modemRssi = modemSignalDbm();
+    if (modemRssi != 0)
+    {
+      char rssiStr[8];
+      snprintf(rssiStr, sizeof(rssiStr), "%d", modemRssi);
+      pubDiag(ha::MODEM_SIGNAL, rssiStr);
+    }
   }
 
-  // SD card.
+  // GPS: fix state + satellite count.
+  String gps;
+  if (isGpsFixUsable(liveData))
+  {
+    gps = String("fix (") + liveData->params.gpsSat + " sats)";
+  }
+  else if (liveData->params.gpsSat > 0)
+  {
+    gps = String("no fix (") + liveData->params.gpsSat + " sats)";
+  }
+  else
+  {
+    gps = "no fix";
+  }
+  pubDiag(ha::DIAG_GPS, gps.c_str());
+
+  // SD card. Mirrors the sdcardStatus console semantics.
   String sd;
   if (liveData->settings.sdcardEnabled != 1)
   {
@@ -2884,11 +2923,15 @@ void BoardCore::publishDiagnosticStatus()
   }
   else if (!liveData->params.sdcardInit)
   {
-    sd = "not present";
+    sd = "not mounted";
+  }
+  else if (liveData->params.sdcardRecording)
+  {
+    sd = (strlen(liveData->params.sdcardFilename) != 0) ? "recording" : "recording (waiting for data)";
   }
   else
   {
-    sd = liveData->params.sdcardRecording ? "recording" : "mounted";
+    sd = "mounted";
   }
   pubDiag(ha::DIAG_SDCARD, sd.c_str());
 

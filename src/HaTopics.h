@@ -83,4 +83,6 @@ namespace ha
   constexpr const char *DIAG_WIFI = "diag_wifi";
   constexpr const char *DIAG_MODEM = "diag_modem";
   constexpr const char *DIAG_SDCARD = "diag_sdcard";
+  constexpr const char *DIAG_GPS = "diag_gps";
+  constexpr const char *MODEM_SIGNAL = "modem_signal";
 } // namespace ha
