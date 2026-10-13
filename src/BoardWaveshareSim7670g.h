@@ -62,6 +62,7 @@ public:
   void modemInfo() override;
   void modemReset() override;
   void modemTest() override;
+  void modemFirmwareInfo() override;
   bool boardCanController() override { return true; }
   bool managesNetworkFailover() override { return failoverActive; }
   void updateBatteryState() override;

@@ -450,6 +450,23 @@ void BoardWaveshareSim7670g::modemTest()
              });
 }
 
+void BoardWaveshareSim7670g::modemFirmwareInfo()
+{
+  // AT+SIMCOMATI returns a multi-line identification block (manufacturer, model,
+  // revision/firmware, IMEI, etc.). Use the blocking sendSync so the whole reply
+  // is captured and printed verbatim to the console.
+  syslog->println(".-[ Modem Firmware (AT+SIMCOMATI) ]-_.");
+  String response;
+  const bool ok = modem.sendSync("AT+SIMCOMATI", 3000, &response);
+  if (!ok && response.length() == 0)
+  {
+    syslog->println("Modem did not respond (check power DIP switch / antenna).");
+    return;
+  }
+  response.trim();
+  syslog->println(response);
+}
+
 void BoardWaveshareSim7670g::modemBegin()
 {
   modemUart = new HardwareSerial(kModemUartNum);

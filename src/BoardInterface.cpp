@@ -2820,6 +2820,11 @@ bool BoardInterface::customConsoleCommand(String cmd)
       modemTest();
       return true;
     }
+    if (value.equalsIgnoreCase("fw") || value.equalsIgnoreCase("ati") || value.equalsIgnoreCase("version"))
+    {
+      modemFirmwareInfo();
+      return true;
+    }
     if (value.substring(0, 4).equalsIgnoreCase("apn="))
     {
       String apn = value.substring(4);
@@ -2872,7 +2877,7 @@ bool BoardInterface::customConsoleCommand(String cmd)
       }
       return true;
     }
-    syslog->println("Usage: modem[=info|reset|test|apn=<apn>|pin=<pin>|user=<user>|pass=<pass>|auth=<0..2>]");
+    syslog->println("Usage: modem[=info|reset|test|fw|apn=<apn>|pin=<pin>|user=<user>|pass=<pass>|auth=<0..2>]");
     return true;
   }
 
@@ -3379,6 +3384,11 @@ void BoardInterface::modemTest()
   syslog->println("This board has no cellular modem.");
 }
 
+void BoardInterface::modemFirmwareInfo()
+{
+  syslog->println("This board has no cellular modem.");
+}
+
 void BoardInterface::batteryInfo()
 {
   syslog->println(".-[ Battery & Power Management ]-_.");
@@ -3514,7 +3524,7 @@ void BoardInterface::showHelp()
   syslog->println("  sdcardStatus          ... check SD card mount status");
   syslog->println("  gpsStatus             ... check GPS fix, satellites & coordinates (alias: gps)");
   syslog->println("  gpsInit               ... initialize / restart GPS module (alias: gnssStart)");
-  syslog->println("  modem[=info|reset|test|apn|pin|user|pass|auth] ... cellular modem status / control");
+  syslog->println("  modem[=info|reset|test|fw|apn|pin|user|pass|auth] ... cellular modem status / control");
   syslog->println("  modemEnabled[=0|1]    ... get/set cellular data connection");
   syslog->println("  modemRoaming[=0|1]    ... get/set cellular roaming allowance");
   syslog->println("  modemPolicy[=0..3]    ... get/set transport policy (0=WiFi, 1=Cell, 2=Cell-only, 3=WiFi-only)");

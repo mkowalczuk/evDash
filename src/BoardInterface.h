@@ -51,6 +51,7 @@ public:
   virtual void modemInfo();
   virtual void modemReset();
   virtual void modemTest();
+  virtual void modemFirmwareInfo();
   virtual void batteryInfo();
   void showHelp();
   void processSerialConsole();
