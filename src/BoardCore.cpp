@@ -2736,6 +2736,7 @@ void BoardCore::publishHomeAssistantDiscovery()
   // (BLE/CAN). The modem entity is only registered on boards that have one.
   publishHaSensor("sensor", ha::DIAG_COMM, "Adapter Link", nullptr, nullptr, nullptr, "diagnostic");
   publishHaSensor("sensor", ha::DIAG_WIFI, "WiFi Status", nullptr, nullptr, nullptr, "diagnostic");
+  publishHaSensor("sensor", ha::DIAG_WIFI_SSID, "WiFi SSID", nullptr, nullptr, nullptr, "diagnostic");
   if (modemStatusText().length() > 0)
   {
     publishHaSensor("sensor", ha::DIAG_MODEM, "Modem Status", nullptr, nullptr, nullptr, "diagnostic");
@@ -2862,17 +2863,17 @@ void BoardCore::publishDiagnosticStatus()
   }
   pubDiag(ha::DIAG_COMM, comm.c_str());
 
-  // WiFi.
+  // WiFi: connection state and SSID as separate fields.
   String wifi;
+  String wifiSsid = "-";
   if (liveData->params.wifiApMode)
   {
     wifi = "AP mode";
   }
   else if (WiFi.status() == WL_CONNECTED)
   {
-    // RSSI is published separately as the wifi_rssi diagnostic; keep this text
-    // to the connection state + SSID only.
-    wifi = String("connected (") + WiFi.SSID() + ")";
+    wifi = "connected";
+    wifiSsid = WiFi.SSID();
   }
   else if (liveData->settings.wifiEnabled == 1)
   {
@@ -2883,6 +2884,7 @@ void BoardCore::publishDiagnosticStatus()
     wifi = "off";
   }
   pubDiag(ha::DIAG_WIFI, wifi.c_str());
+  pubDiag(ha::DIAG_WIFI_SSID, wifiSsid.c_str());
 
   // Modem (board-specific; empty means no modem on this board).
   const String modem = modemStatusText();
