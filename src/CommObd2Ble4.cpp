@@ -443,7 +443,8 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
   liveData->pClient->setConnectTimeout(3); // 3 seconds timeout
 #endif
 
-  // Poll hardware buttons/touch input before initiating connection
+  // Poll hardware buttons/touch input and console before initiating connection
+  board->processSerialConsole();
   board->boardLoop();
   if (liveData->params.stopCommandQueue || !liveData->obd2ready)
   {
@@ -485,6 +486,7 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
   const uint32_t connStartMs = millis();
   while (!connected && !liveData->pClient->isConnected() && (millis() - connStartMs < 3000))
   {
+    board->processSerialConsole(); // keep console responsive during connect
     board->boardLoop();
     if (liveData->params.stopCommandQueue || !liveData->obd2ready)
     {
@@ -503,6 +505,7 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
     const uint32_t connStartMs2 = millis();
     while (!connected && !liveData->pClient->isConnected() && (millis() - connStartMs2 < 3000))
     {
+      board->processSerialConsole(); // keep console responsive during connect
       board->boardLoop();
       if (liveData->params.stopCommandQueue || !liveData->obd2ready)
       {
@@ -523,6 +526,7 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
   bool connected = liveData->pClient->connect(pAddress, primaryType);
   if (!connected && liveData->obd2ready && !liveData->params.stopCommandQueue)
   {
+    board->processSerialConsole(); // drain any console input queued during the blocking connect
     board->boardLoop();
     if (!liveData->params.stopCommandQueue && liveData->obd2ready)
     {
@@ -530,6 +534,7 @@ bool CommObd2Ble4::connectToServer(BLEAddress pAddress)
       connected = liveData->pClient->connect(pAddress, fallbackType);
     }
   }
+  board->processSerialConsole(); // drain console input queued during the blocking connect(s)
 #endif
 
   if (liveData->params.stopCommandQueue || !liveData->obd2ready)
