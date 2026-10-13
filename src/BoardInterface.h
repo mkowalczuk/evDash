@@ -87,6 +87,10 @@ public:
   static void generateRandomAlphanumeric(char *buf, size_t count);
   static bool isValidPassword(const char *pwd, size_t minLen = 8);
   virtual bool wifiSetup() { return false; }
+  // Whether this board actually has a screen. Headless boards (Waveshare)
+  // return false so display-only work — automatic brightness, screen redraws —
+  // is skipped. The 320x240 display base overrides this to true.
+  virtual bool hasDisplay() { return false; }
   // Sdcard
   virtual bool sdcardMount() { return false; };
   virtual void sdcardToggleRecording() = 0;

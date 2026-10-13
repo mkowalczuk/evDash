@@ -89,6 +89,7 @@ public:
   void mainLoop() override;
   bool skipAdapterScan() override;
   void otaUpdate() override;
+  bool hasDisplay() override { return true; }
   // SD card
   bool sdcardMount() override;
   bool sdBegin() override;

@@ -3524,6 +3524,10 @@ void BoardInterface::setSystemTimeUtc(time_t epoch, const char *sourceTag)
  */
 void BoardInterface::calcAutomaticBrightnessLatLon()
 {
+  if (!hasDisplay()) // headless board: nothing to dim
+  {
+    return;
+  }
   if (liveData->settings.lcdBrightness == 0) // only for automatic mode
   {
     if (liveData->params.currentTime < 1700000000)
