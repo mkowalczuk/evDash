@@ -355,6 +355,8 @@ void BoardInterface::loadSettings()
   liveData->settings.mqttInstantUpdates = 0; // off by default
   // v39
   liveData->settings.mqttGpsIntervalSec = 0; // 0 = publish GPS with every MQTT send
+  // v40
+  liveData->settings.webServerTimeoutSec = 300; // auto-stop web log server after 5 min idle
 
   // Load settings and replace default values
   syslog->println("Reading settings from eeprom.");
@@ -648,8 +650,13 @@ void BoardInterface::loadSettings()
       }
       if (liveData->tmpSettings.settingsVersion == 38)
       {
-        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.settingsVersion = 39;
         liveData->tmpSettings.mqttGpsIntervalSec = 0;
+      }
+      if (liveData->tmpSettings.settingsVersion == 39)
+      {
+        liveData->tmpSettings.settingsVersion = SETTINGS_VERSION_CURRENT;
+        liveData->tmpSettings.webServerTimeoutSec = 300;
       }
 
       // Save upgraded structure
@@ -2702,6 +2709,59 @@ bool BoardInterface::customConsoleCommand(String cmd)
     return true;
   }
 
+  // Web log server on-demand control
+  if (key.equalsIgnoreCase("webServer"))
+  {
+    if (isSetter)
+    {
+      if (value == "1" || value.equalsIgnoreCase("on") || value.equalsIgnoreCase("start"))
+      {
+        startWebLogServer();
+      }
+      else if (value == "0" || value.equalsIgnoreCase("off") || value.equalsIgnoreCase("stop"))
+      {
+        stopWebLogServer();
+      }
+      else
+      {
+        syslog->println("Error: Use webServer=1 (start) or webServer=0 (stop)");
+      }
+    }
+    else
+    {
+      if (webLogServerRunning())
+      {
+        syslog->printf("webServer: running (idle %u sec, timeout %u sec)\n",
+                       webLogServerIdleSec(), liveData->settings.webServerTimeoutSec);
+      }
+      else
+      {
+        syslog->println("webServer: stopped");
+      }
+    }
+    return true;
+  }
+
+  // Web log server idle timeout
+  if (key.equalsIgnoreCase("webServerTimeout"))
+  {
+    if (isSetter)
+    {
+      liveData->settings.webServerTimeoutSec = static_cast<uint16_t>(value.toInt());
+      saveSettings();
+      syslog->printf("webServerTimeout set to: %u sec%s\n",
+                     liveData->settings.webServerTimeoutSec,
+                     (liveData->settings.webServerTimeoutSec == 0) ? " (disabled)" : "");
+    }
+    else
+    {
+      syslog->printf("webServerTimeout: %u sec%s\n",
+                     liveData->settings.webServerTimeoutSec,
+                     (liveData->settings.webServerTimeoutSec == 0) ? " (disabled)" : "");
+    }
+    return true;
+  }
+
   // Legacy OBD2 WiFi
   if (key.equalsIgnoreCase("obd2WifiIp") || key.equalsIgnoreCase("obd2ip"))
   {
@@ -3507,6 +3567,8 @@ void BoardInterface::showHelp()
   syslog->println("  mqttInterval[=sec]    ... get/set MQTT upload interval");
   syslog->println("  mqttInstantUpdates[=0|1] ... get/set instant publish on car update");
   syslog->println("  mqttGpsInterval[=sec] ... get/set MQTT GPS interval (0=every send)");
+  syslog->println("  webServer[=0|1]       ... start/stop web log server (view/download SD logs)");
+  syslog->println("  webServerTimeout[=sec]... get/set web server idle auto-stop (0=never, default 300)");
   syslog->println("Diagnostics & CAN:");
   syslog->println("  record=1..4           ... record CAN response buffer");
   syslog->println("  compare               ... compare CAN buffers");

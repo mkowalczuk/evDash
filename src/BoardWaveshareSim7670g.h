@@ -47,6 +47,11 @@ public:
   bool sdcardMount() override;
   void sdcardToggleRecording() override;
   fs::FS &boardFilesystem() override { return SD_MMC; }
+  void boardFilesystemBytes(uint64_t &total, uint64_t &used) override
+  {
+    total = SD_MMC.totalBytes();
+    used = SD_MMC.usedBytes();
+  }
   void initBoard() override;
   void commLoop() override;
   void boardLoop() override;

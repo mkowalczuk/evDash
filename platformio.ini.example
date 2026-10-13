@@ -11,8 +11,11 @@ monitor_speed = 115200
 ;   Waveshare-only: the SIM7670G modem board, its GNSS driver and the onboard
 ;     WS2812B status LED (the last pulls in Adafruit NeoPixel, a Waveshare-only
 ;     dependency).
-;   M5-only: the 320x240 display stack (screen/menu/OTA/webserver) and the two
-;     M5 board adapters, which pull in the M5 display libraries.
+;   M5-only: the 320x240 display stack (screen/menu/OTA/web-server screen) and
+;     the two M5 board adapters, which pull in the M5 display libraries. The
+;     web log server's HTTP handlers and lifecycle are board-neutral
+;     (BoardCore_webserver.cpp) and build everywhere; only the on-screen
+;     web-server view (Board320_240_webserver.cpp) is M5-only.
 src_filter_m5 = +<*> -<BoardWaveshareSim7670g.cpp> -<Sim7670G.cpp> -<StatusLed.cpp>
 src_filter_waveshare = +<*> -<Board320_240.cpp> -<Board320_240_display.cpp> -<Board320_240_menu.cpp> -<Board320_240_ota.cpp> -<Board320_240_ui.cpp> -<Board320_240_webserver.cpp> -<BoardM5stackCore2.cpp> -<BoardM5stackCoreS3.cpp>
 build_flags =

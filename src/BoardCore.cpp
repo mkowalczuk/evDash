@@ -3534,6 +3534,10 @@ void BoardCore::netLoop()
     }
   }
 
+  // Tick the web log server (non-blocking; handles one client request per loop
+  // iteration and checks the idle timeout).
+  webLogServerLoop();
+
   // Upload GPS position to Traccar (default every 5 seconds)
   if (netReady && traccarConfigured)
   {

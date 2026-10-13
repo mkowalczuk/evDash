@@ -7,6 +7,8 @@
 #include <PubSubClient.h>
 #include "SDL_Arduino_INA3221.h"
 
+class WebServer;
+
 /**
  * Display-free board logic.
  *
@@ -112,6 +114,16 @@ public:
   virtual void otaUpdate() {}
   virtual void showBootProgress(const char *step, const char *detail, uint16_t bgColor = 0) { (void)step; (void)detail; (void)bgColor; }
   //
+  // Web log server — non-blocking; ticked from netLoop(). Available on all
+  // boards that have SD and WiFi. Board320_240 wraps these in a blocking touch
+  // loop on top; headless boards drive them purely via console commands.
+  //
+  bool startWebLogServer() override;
+  void stopWebLogServer() override;
+  void webLogServerLoop() override;   // call from netLoop() every iteration
+  bool webLogServerRunning() override { return webLogServer != nullptr; }
+  uint32_t webLogServerIdleSec() override { return (millis() - webLogServerLastActivityMs) / 1000; }
+  //
   // Screen count drives the button-driven screen rotation. A headless board has
   // no screens to rotate through, so 0 is meaningful here rather than a bug.
   void setDisplayScreenCount(uint8_t count) { displayScreenCount = count; }
@@ -159,6 +171,12 @@ protected:
   // topics were published this call. Used by both netSendData() and the
   // standalone GPS tick in netLoop().
   bool publishMqttGpsIfDue();
+  // HTTP handlers for the web log server (use boardFilesystem() so they work on
+  // both SPI-SD and SD_MMC backends).
+  void handleWebLogRoot(WebServer &server);
+  void handleWebLogDownload(WebServer &server);
+  void handleWebLogView(WebServer &server);
+  void handleWebLogDelete(WebServer &server);
   void publishHomeAssistantDiscovery();
   void publishHaSensor(const char *component, const char *objectId, const char *name,
                        const char *deviceClass, const char *unit, const char *stateClass,
@@ -175,6 +193,10 @@ protected:
   time_t lastInstantCanbusResponseTime = 0;
   uint32_t lastMqttGpsPublishMs = 0;
   uint32_t lastPublishedGpsFixMs = 0;
+  // Web log server (non-blocking; shared between display and headless boards)
+  WebServer *webLogServer = nullptr;
+  bool webLogServerSoftApStarted = false;
+  uint32_t webLogServerLastActivityMs = 0;
   uint32_t wifiTransferredBytes = 0;
   uint32_t wifiTransferLastActivityMs = 0;
   uint32_t lastFirmwareVersionCheckMs = 0;

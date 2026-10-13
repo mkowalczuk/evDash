@@ -100,10 +100,6 @@ public:
   void stopSdcardConsoleLog();
   void runWebLogServer();
   void drawWebLogServerScreen(const String &ssid, const String &ip, bool isSta);
-  void handleWebLogRoot(WebServer &server);
-  void handleWebLogDownload(WebServer &server);
-  void handleWebLogView(WebServer &server);
-  void handleWebLogDelete(WebServer &server);
   //
   // GPS
   //

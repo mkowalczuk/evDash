@@ -64,6 +64,13 @@ public:
   virtual bool ensureMqttConnected() { return false; }
   virtual void disconnectMqtt(bool sendOfflineStatus = false) {}
   virtual void publishHomeAssistantDiscovery() {}
+  // Web log server (non-blocking HTTP server for SD logs). Boards with SD + WiFi
+  // override these in BoardCore; the no-op defaults keep BoardInterface callable.
+  virtual bool startWebLogServer() { return false; }
+  virtual void stopWebLogServer() {}
+  virtual void webLogServerLoop() {}
+  virtual bool webLogServerRunning() { return false; }
+  virtual uint32_t webLogServerIdleSec() { return 0; }
   // Graphics & GUI
   virtual void displayMessage(const char *row1, const char *row2) = 0;
   virtual void displayMessage(const char *row1, const char *row2, const char *row3) { displayMessage(row1, row2); }
@@ -99,6 +106,14 @@ public:
   // recording/upload/console code goes through this instead of a hardcoded
   // global so it works on either backend. Default: SPI SD.
   virtual fs::FS &boardFilesystem() { return SD; }
+  // Total/used bytes of the board filesystem, for the web log server storage
+  // readout. fs::FS has no size API, so each board reports via its concrete
+  // type. Default: the SPI SD global (matches boardFilesystem()'s default).
+  virtual void boardFilesystemBytes(uint64_t &total, uint64_t &used)
+  {
+    total = SD.totalBytes();
+    used = SD.usedBytes();
+  }
   bool serializeParamsToJson(File file, bool inclApiKey = false);
   bool serializeParamsToJson(String &outJson, bool inclApiKey = false);
   virtual bool buildContributePayloadV2(String &outJson, bool useReadableTsForSd = false)
