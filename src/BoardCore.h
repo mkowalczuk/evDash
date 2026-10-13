@@ -167,9 +167,10 @@ protected:
   bool ensureMqttConnected();
   // Publishes the GPS topics (lat/lon/speed/alt/heading) if a fix is usable and
   // the configured GPS interval has elapsed. mqttGpsIntervalSec==0 publishes on
-  // every new fix; >0 throttles to that many seconds. Returns true if the
-  // topics were published this call. Used by both netSendData() and the
-  // standalone GPS tick in netLoop().
+  // every new fix; >0 throttles to that many seconds. Returns false ONLY if a
+  // GPS publish was attempted and failed; "nothing to publish" (no fix, not due,
+  // not connected) returns true so callers can fold it into a success flag.
+  // Used by both netSendData() and the standalone GPS tick in netLoop().
   bool publishMqttGpsIfDue();
   // HTTP handlers for the web log server (use boardFilesystem() so they work on
   // both SPI-SD and SD_MMC backends).

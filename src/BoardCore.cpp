@@ -2392,13 +2392,17 @@ bool BoardCore::ensureMqttConnected()
 
 bool BoardCore::publishMqttGpsIfDue()
 {
+  // Contract: returns false ONLY when a GPS publish was attempted and failed.
+  // "Nothing to publish" (not connected, no fix, not due yet) returns true, so
+  // callers can fold the result into an overall `published &= ...` success flag
+  // without a skipped GPS publish being mistaken for a send error.
   if (mqttClient == nullptr || !mqttClient->connected())
   {
-    return false;
+    return true; // not our concern here; nothing attempted
   }
   if (!isGpsFixUsable(liveData))
   {
-    return false;
+    return true; // no fix to publish — not a failure
   }
 
   // mqttGpsIntervalSec==0 => publish on every new fix (fresh gpsLastFixMs);
@@ -2417,7 +2421,7 @@ bool BoardCore::publishMqttGpsIfDue()
   }
   if (!due)
   {
-    return false;
+    return true; // throttled / already published this fix — not a failure
   }
 
   lastMqttGpsPublishMs = millis();
@@ -2886,6 +2890,10 @@ bool BoardCore::netSendData(bool sendAbrp)
             published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/uptime", millis() / 1000);
             published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/wifi_rssi", (trans != nullptr) ? trans->rssi() : 0);
             published &= publishMqttInt(*mqttClient, liveData->settings.mqttPubTopic, "/car_connected", (liveData->params.socPerc >= 0) ? 1 : 0);
+            // Service the client mid-burst so the TCP write buffer drains; a long
+            // run of back-to-back publish() calls can otherwise momentarily fill
+            // it and return false even though the broker receives the data.
+            mqttClient->loop();
           }
 
           // Car telemetry (only when car CAN/BLE is communicating and socPerc >= 0)
@@ -3309,7 +3317,9 @@ bool BoardCore::netSendData(bool sendAbrp)
   int64_t duration2 = endTime2 - startTime2;
   // syslog->println("Time taken by function: netSendData() " + String(duration2) + " microseconds");
 
-  return true;
+  // Report the real outcome of the attempted send (rc==200 on success) so
+  // callers like testMqtt reflect it, instead of always claiming success.
+  return (rc == 200);
 }
 
 /**
@@ -3541,7 +3551,8 @@ void BoardCore::netLoop()
   {
     if (ensureMqttConnected())
     {
-      if (publishMqttGpsIfDue() && mqttClient != nullptr && mqttClient->connected())
+      publishMqttGpsIfDue();
+      if (mqttClient != nullptr && mqttClient->connected())
       {
         mqttClient->loop();
       }
