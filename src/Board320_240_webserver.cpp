@@ -41,12 +41,7 @@ void Board320_240::drawWebLogServerScreen(const String &ssid, const String &ip, 
     String urlLine = "http://" + ip + "/";
     sprDrawString(urlLine.c_str(), cardX + 14, cardY + 66);
 
-    if (isSta)
-    {
-      spr.setTextColor(TFT_ORANGE, 0x18C3);
-      sprDrawString("or  http://evdash.local/", cardX + 14, cardY + 92);
-    }
-    else
+    if (!isSta)
     {
       spr.setTextColor(TFT_ORANGE, 0x18C3);
       String passLine = "AP Pass: " + String(liveData->settings.webLogServerPassword);
@@ -114,12 +109,7 @@ void Board320_240::drawWebLogServerScreen(const String &ssid, const String &ip, 
     String urlLine = "http://" + ip + "/";
     tft.drawString(urlLine.c_str(), cardX + 14, cardY + 66);
 
-    if (isSta)
-    {
-      tft.setTextColor(TFT_ORANGE, 0x18C3);
-      tft.drawString("or  http://evdash.local/", cardX + 14, cardY + 92);
-    }
-    else
+    if (!isSta)
     {
       tft.setTextColor(TFT_ORANGE, 0x18C3);
       String passLine = "AP Pass: " + String(liveData->settings.webLogServerPassword);

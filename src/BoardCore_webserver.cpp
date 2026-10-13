@@ -19,7 +19,6 @@
 #include "BoardCore.h"
 #include <WiFi.h>
 #include <WebServer.h>
-#include <ESPmDNS.h>
 #include <FS.h>
 
 // ---------------------------------------------------------------------------
@@ -335,10 +334,6 @@ bool BoardCore::startWebLogServer()
     syslog->printf("WiFi AP evDash started: IP %s, pass %s\n", ipStr.c_str(), liveData->settings.webLogServerPassword);
   }
 
-  bool mdnsOk = MDNS.begin("evdash");
-  if (mdnsOk)
-    MDNS.addService("http", "tcp", 80);
-
   webLogServer = new WebServer(80);
   webLogServer->on("/", HTTP_GET, [this]() {
     handleWebLogRoot(*webLogServer);
@@ -360,9 +355,7 @@ bool BoardCore::startWebLogServer()
   webLogServerLastActivityMs = millis();
 
   syslog->printf("Web log server started: http://%s/\n", ipStr.c_str());
-  if (wasConnected)
-    syslog->println("  or: http://evdash.local/");
-  else
+  if (!wasConnected)
     syslog->printf("  WiFi AP: evDash  Pass: %s\n", liveData->settings.webLogServerPassword);
 
   const uint16_t tSec = liveData->settings.webServerTimeoutSec;
@@ -382,8 +375,6 @@ void BoardCore::stopWebLogServer()
   webLogServer->stop();
   delete webLogServer;
   webLogServer = nullptr;
-
-  MDNS.end();
 
   if (webLogServerSoftApStarted)
   {
