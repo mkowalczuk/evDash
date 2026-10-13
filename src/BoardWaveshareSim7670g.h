@@ -103,6 +103,12 @@ private:
   Sim7670G modem;
   ModemTransport modemTransport;
   bool gpsFed = false;
+  // AGPS assist (AT+CGNSSAGPS) only works once the cellular data connection is
+  // open, but initGPS() runs when the modem's AT UART first answers — typically
+  // before data is up. Track whether we have (re)issued AGPS while data was
+  // ready so boardLoop() can do it once the PDP context actually opens, and
+  // again after a data reconnect.
+  bool agpsRequestedWithData = false;
   SFE_MAX1704X max17048;
   BatteryMonitor batteryMonitor;
 };

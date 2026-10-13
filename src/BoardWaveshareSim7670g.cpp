@@ -264,6 +264,23 @@ void BoardWaveshareSim7670g::boardLoop()
     syncGPS();
   }
 
+  // AGPS (AT+CGNSSAGPS) downloads assist data over the cellular PDP context to
+  // shorten time-to-first-fix, but it only works once the data connection is
+  // open. initGPS() issues it at GNSS power-up, which is usually before data is
+  // up, so re-issue it the moment the data link becomes ready. Re-arm on a data
+  // drop so a reconnect assists again. Costs one AT command per data (re)connect.
+  const bool dataReady = modem.dataReady();
+  if (dataReady && !agpsRequestedWithData)
+  {
+    syslog->info(DEBUG_GPS, "SIM7670G: data up, requesting AGPS assist");
+    modem.send("AT+CGNSSAGPS=1", 1000);
+    agpsRequestedWithData = true;
+  }
+  else if (!dataReady && agpsRequestedWithData)
+  {
+    agpsRequestedWithData = false; // re-arm for the next data reconnect
+  }
+
   updateStatusLed();
 }
 
@@ -310,11 +327,10 @@ void BoardWaveshareSim7670g::initGPS()
   // view is the most reliable way to cut time-to-first-fix; the default may be
   // GPS-only. Value 15 = all four systems.
   modem.send("AT+CGNSSMODE=15", 1000);
-  // Best-effort AGPS: downloads assist data over the PDP context to shorten a
-  // cold fix. NOTE: it needs the cellular data connection, so it is ineffective
-  // when data is gated off (modemHoldData=1 / policy 3). Field reports on this
-  // firmware show the benefit is modest-to-none, so this is a best-effort hint,
-  // not a guaranteed speed-up. Harmless if it returns ERROR.
+  // Best-effort AGPS at power-up: downloads assist data over the PDP context to
+  // shorten a cold fix. This early call usually happens before the data link is
+  // open (so it may be a no-op here); boardLoop() re-issues it once the data
+  // connection is actually ready, which is when the assist download can succeed.
   modem.send("AT+CGNSSAGPS=1", 1000);
   modem.send("AT+CGNSSTST=1", 1000);
   modem.send("AT+CGNSSPORTSWITCH=0,1", 1000);
