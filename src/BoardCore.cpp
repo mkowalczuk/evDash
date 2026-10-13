@@ -3526,6 +3526,11 @@ void BoardCore::netLoop()
     const uint32_t abrpIntervalMs = static_cast<uint32_t>(liveData->settings.remoteUploadAbrpIntervalSec) * 500;
     if (abrpIntervalMs > 0 && (lastAbrpSendAtMs == 0 || (millis() - lastAbrpSendAtMs) > abrpIntervalMs))
     {
+      // Advance the throttle at the tick, not only inside the HTTP send path:
+      // netSendData() bails out early when car data is not yet valid, and if
+      // the timestamp were updated only on a real send the tick would re-fire
+      // every loop (~1s) while waiting for data instead of honoring the interval.
+      lastAbrpSendAtMs = millis();
       syslog->info(DEBUG_ABRP, "ABRP send tick");
       int64_t startTime = esp_timer_get_time();
       netSendData(true);
