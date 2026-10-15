@@ -1,28 +1,130 @@
-help				        show console commands help (aliases: commands, ?)
-reboot				        reboot device
-shutdown			    	    shutdown device
-saveSettings			    save current settings
-ipconfig			        print network settings
-debugLevel=n   [n = 0..255]	set debug level bitmask (1=comm, 2=net, 4=sdcard, 8=gps, 16=abrp, 255=all, 0=none)
-ABRP_debug				print ABRP user token
-wifiSsid=x			        set primary AP ssid
-wifiPassword=x			    set primary AP password
-wifiSsid2=x			        set 2nd AP ssid (replace primary wifi automatically in 1-2 minutes)
-wifiPassword2=x			    set 2nd AP password
-wifiSsid3=x			        set 3rd AP ssid
-wifiPassword3=x			    set 3rd AP password
-wifiSsid4=x			        set 4th AP ssid
-wifiPassword4=x			    set 4th AP password
-abrpApiToken=x			    set abrp api token for live data
-gprsApn=x			        set gprs (sim800l) apn
-remoteApiUrl=x			    set remote api url
-remoteApiKey=x			    set remote api key
-serviceUUID=x			    set device uuid for obd2 ble adapter
-charTxUUID=x			    set tx uuid for obd2 ble adapter
-charRxUUID=x			    set rx uuid for obd2 ble adapter
-time				        print current time
-ntpSync				        sync Time with de.pool.ntp.org
-setTime=2022-12-30 05:00:00	set current time
-record=n   [n = 1..4]		record can response to buffer 1..4
-compare				        compare buffers
-test				        test handler
+evDash serial console commands
+===============================
+
+System:
+  help / ?                      show this help (alias: commands)
+  reboot / shutdown             reboot / deep sleep
+  saveSettings                  save settings to EEPROM
+  factoryReset                  reset settings to defaults
+  time                          print current time
+  setTime=YYYY-MM-DD HH:MM:SS   set clock
+  ntpSync                       sync time via NTP
+  ipconfig                      print network status
+  debugLevel[=n|comm,net,sd,gps,abrp,modem,all,none]   get/set debug mask
+                                use +flag/-flag/!flag to toggle one (e.g. !gps disables GPS, keeps rest)
+
+WiFi:
+  wifiEnabled[=0|1]             get/set WiFi enabled
+  wifiScan                      scan and list WiFi APs
+  wifiConnect                   trigger WiFi connection now
+  wifiSsid[=x]                  get/set primary WiFi SSID
+  wifiPassword[=x]              get/set primary WiFi password
+  backupWifi[=0|1]              get/set backup WiFi enabled
+  wifiSsid2..4[=x]              get/set backup WiFi SSID (2..4)
+  wifiPassword2..4[=x]          get/set backup WiFi password (2..4)
+  apPassword[=x]                get/set web log server AP password
+  ntpEnabled[=0|1]              get/set NTP auto-sync
+
+Vehicle & Adapter:
+  cars                          list available car models & IDs
+  carType[=id|name]             get/set car type (reboot required)
+  commType[=0|1|ble|can]        get/set comm type (0=BLE, 1=CAN)
+  obdMac[=mac]                  get/set OBD2 BLE MAC address
+  obd2Name[=name]               get/set OBD2 device display name
+  serviceUUID[=uuid]            get/set BLE service UUID
+  charTxUUID[=uuid]             get/set BLE Tx characteristic UUID
+  charRxUUID[=uuid]             get/set BLE Rx characteristic UUID
+  bleAddressType[=pub|rand]     get/set BLE MAC address type
+  commandQueueAutoStop[=0|1]    get/set CAN queue autostop
+  disableCommandOptimizer[=0|1] get/set command optimizer
+  mobileRelay[=0|1]             get/set mobile app BLE relay
+  mobileRelayPair               start mobile app pairing
+  mobileRelayForget             clear mobile app pairing
+  clearStats                    clear driving & charging stats
+  loadTestData                  load demo telemetry data
+
+Board & Settings:
+  boardPowerMode[=0|1]          get/set power mode (0=USB, 1=ext)
+  timezone[=n]                  get/set timezone offset (-11..+14)
+  daylightSaving[=0|1]          get/set daylight saving time
+  distanceUnit[=k|m]            get/set unit: km or miles
+  temperatureUnit[=c|f]         get/set unit: C or F
+  pressureUnit[=b|p]            get/set unit: bar or psi
+  defaultScreen[=n]             get/set default screen (1..6, 8)
+  displayRotation[=n]           get/set screen rotation (1 or 3)
+  lcdBrightness[=0..100]        get/set brightness (0=auto)
+  sleepMode[=0..2]              get/set sleep level (0=off, 1=screen, 2=deep)
+  serialConsolePort[=n]         get/set serial console port (0, 255=off)
+  speedCorrection[=n]           get/set speed correction (-5..+5)
+  rightHandDrive[=0|1]          get/set right hand drive (RHD)
+
+Hardware modules:
+  sdcardEnabled[=0|1]           get/set SD card logging
+  sdcardConsoleLog[=0|1]        get/set console log to SD
+  sdcardAutstartLog[=0|1]       get/set SD autostart log
+  sdcardLogRetention[=n]        get/set SD log retention: 1,5,10,20,50,100,0=unlimited
+  sdcardStatus                  check SD card mount status
+  gpsStatus                     check GPS fix, satellites & coordinates (alias: gps)
+  gpsInit                       initialize / restart GPS module (alias: gnssStart)
+  modem[=info|reset|test|fw|apn|pin|user|pass|auth]   cellular modem status / control
+                                (fw: print the full AT+SIMCOMATI identification / firmware)
+  modemEnabled[=0|1]            get/set cellular data connection
+  modemRoaming[=0|1]            get/set cellular roaming allowance
+  modemPolicy[=0..3]            get/set transport policy (0=WiFi, 1=Cell, 2=Cell-only, 3=WiFi-only)
+  modemDataSaver[=0|1]          get/set reduced cellular data usage
+  modemHoldData[=0|1]           policy 0/1: 1=hold cellular data until needed as fallback (GPS stays on), 0=keep open
+  modemTlsInsecure[=0|1]        get/set skip TLS cert check on modem sockets
+  modemNetworkMode[=0|1|2]      get/set network mode (0 auto, 1 LTE, 2 GSM)
+  modemHttpEnabled[=0|1], modemMqttEnabled[=0|1]   allow HTTP / MQTT over modem
+  modemSocketTimeoutMs[=ms], modemRetryBackoffSec[=sec]   modem timing
+  statusLedEnabled[=0|1]        get/set onboard RGB status LED
+  statusLedBrightness[=0..100]  get/set status LED brightness %
+  gpsModuleType[=0..3]          get/set GPS (0=none, 1=M8N, 2=GNSS, 3=v2.1)
+  gpsPort[=0|2|255]             get/set GPS hardware serial port
+  gpsSpeed[=baud]               get/set GPS baud rate
+  carSpeedType[=0..2]           get/set car speed (0=auto, 1=car, 2=gps)
+  voltmeterEnabled[=0|1]        get/set INA3221 voltmeter
+  voltmeterSleep[=0|1]          get/set voltmeter-based sleep
+  voltmeterSleepVol[=v]         get/set voltmeter sleep voltage threshold
+  voltmeterWakeUpVol[=v]        get/set voltmeter wake-up voltage threshold
+  voltmeterCutOffVol[=v]        get/set voltmeter cut-off voltage threshold
+  voltmeterInfo                 print current voltmeter readings
+  battery[=info|type|usbcharge] 18650 battery status / configuration
+  batteryPackType[=0|1]         get/set battery chemistry (0=Li-ion, 1=LiFePO4)
+  batteryUsbChargeEnabled[=0|1] get/set charge only when USB powered
+
+Remote upload & MQTT:
+  remoteUploadIntervalSec[=s]       get/set upload interval (0=disabled)
+  remoteUploadAbrpIntervalSec[=s]   get/set ABRP interval
+  remoteApiUrl[=url]            get/set remote server URL
+  remoteApiKey[=key]            get/set remote server API key
+  abrpApiToken[=token]          get/set ABRP telemetry token
+  abrpSdcardLog[=0|1]           get/set log ABRP to SD
+  contributeData[=0|1]          get/set contribute to evdash.eu
+  contributeOnce                send contribute snapshot now
+  traccarEnabled[=0|1]          get/set Traccar client
+  traccarServer[=host]          get/set Traccar server host
+  traccarPort[=port]            get/set Traccar server port
+  mqtt                          show all MQTT settings
+  testMqtt                      test MQTT connection & publish
+  mqttEnabled[=0|1]             get/set MQTT upload
+  mqttSecure[=0|1]              get/set MQTT TLS/SSL encryption
+  mqttServer[=host]             get/set MQTT server host
+  mqttPort[=port]               get/set MQTT port (0=auto 1883/8883)
+  mqttId[=id]                   get/set MQTT client ID
+  mqttUsername[=user]           get/set MQTT username
+  mqttPassword[=pwd]            get/set MQTT password
+  mqttPubTopic[=topic]          get/set MQTT publish topic
+  mqttHa[=0|1]                  get/set Home Assistant MQTT discovery
+  haName[=name]                 get/set Home Assistant device name
+  haModel[=model]               get/set Home Assistant device model
+  mqttInterval[=sec]            get/set MQTT upload interval
+  mqttInstantUpdates[=0|1]      get/set instant publish on car update
+  mqttGpsInterval[=sec]         get/set MQTT GPS interval (0=every send)
+  webServer[=0|1]               start/stop web log server (view/download SD logs)
+  webServerTimeout[=sec]        get/set web server idle auto-stop (0=never, default 300)
+
+Diagnostics & CAN:
+  record=1..4                   record CAN response buffer
+  compare                       compare CAN buffers
+  test=x                        run car test handler

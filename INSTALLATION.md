@@ -43,6 +43,7 @@ esptool.py -p /dev/ttyUSB0 -b 921600 write_flash \
 ~/.platformio/penv/bin/pio run -e m5stack-cores3   # CoreS3 and CoreS3 SE (K128-SE)
 ~/.platformio/penv/bin/pio run -e m5stack-core2-v1_0
 ~/.platformio/penv/bin/pio run -e m5stack-core2-v1_1
+~/.platformio/penv/bin/pio run -e waveshare-sim7670g   # headless Waveshare ESP32-S3-SIM7670G
 ```
 
 6. Upload:

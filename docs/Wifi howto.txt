@@ -1,26 +1,55 @@
-It is possible to enter up to four WIFI networks:
+WiFi setup (evDash)
+===================
 
+Enable WiFi and enter up to four networks (one primary + three backups):
+
+wifiEnabled=1			turn WiFi on (off by default on some builds)
 wifiSsid=x			set primary AP ssid
 wifiPassword=x			set primary AP password
-wifiSsid2=x			set 2nd AP ssid (replace primary wifi automatically in 1-2 minutes)
+backupWifi=1			enable the backup networks (ssid2..4)
+wifiSsid2=x			set 2nd AP ssid
 wifiPassword2=x			set 2nd AP password
 wifiSsid3=x			set 3rd AP ssid
 wifiPassword3=x			set 3rd AP password
 wifiSsid4=x			set 4th AP ssid
 wifiPassword4=x			set 4th AP password
 
-On startup evDash connects to the main wifi.
-mainLoop() does take care of wifi. If wifi is enabled and there is no connection for more than 60 seconds it calls wififallback()
-When wififallback() is called, it checks whether main or backup wifi was active last time. It tries to connect to the other.
-If only main wifi is configured it allways tries to connect to this.
-
-There is no need for netSendData() to take care of wifi. It is removed.
-
-If you want to delete the second Wifi again, because you only want to use one, you have to enter:
-
-wifiSsid2=empty
-
-Don't forget to save:
+Save and restart to apply:
 
 saveSettings
 reboot
+
+Useful commands:
+
+wifiScan			scan and list nearby APs
+wifiConnect			trigger a connection attempt now
+ipconfig			print current network status (SSID, IP, RSSI)
+
+Connection behaviour
+--------------------
+On startup evDash connects to the primary WiFi. If a connection cannot be
+established for about 60 seconds, it falls back to the other configured network
+(primary <-> backup). When only the primary is configured, it keeps retrying
+that one. The main loop owns this; data upload does not manage WiFi.
+
+Removing a backup network
+-------------------------
+Set its SSID to "empty" and save:
+
+wifiSsid2=empty
+saveSettings
+reboot
+
+Cellular failover (Waveshare SIM7670G board)
+--------------------------------------------
+On the headless Waveshare board, WiFi and the cellular modem can be used
+together with automatic failover. The active uplink is chosen by the transport
+policy; health is probed on each link so evDash switches to whichever is
+actually reachable:
+
+modemPolicy=0			WiFi preferred, cellular fallback (default)
+modemPolicy=1			cellular preferred, WiFi fallback
+modemPolicy=2			cellular only
+modemPolicy=3			WiFi only (GNSS stays on, cellular data held off)
+
+See "Console commands.txt" for the full modem/cellular command set.

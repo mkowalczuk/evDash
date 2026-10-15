@@ -1,6 +1,6 @@
 # evDash
 
-evDash is an open-source EV dashboard for M5Stack devices. It reads live vehicle data from CAN/OBD2, shows real-time screens on a 320x240 touch display, and can log or upload telemetry over WiFi.
+evDash is an open-source EV dashboard for M5Stack devices and a headless Waveshare ESP32-S3 board. It reads live vehicle data from CAN/OBD2, shows real-time screens on a 320x240 touch display (on M5 boards), and can log or upload telemetry over WiFi or cellular (4G).
 
 Use this firmware at your own risk.
 
@@ -10,10 +10,13 @@ Use this firmware at your own risk.
 
 ## What evDash does
 
-- live EV telemetry on multiple screens (tiles, speed, cells, charging graph, debug, HUD)
+- live EV telemetry on multiple screens (tiles, speed, cells, charging graph, debug, HUD) on display boards
 - touch-first UI with menu paging, drag scrolling, and on-screen keyboard
 - communication via CAN (MCP2515/COMMU) or OBD2 BLE4
-- SD card logging and optional remote uploads (ABRP, MQTT, contribute)
+- networking over WiFi and/or cellular (SIM7670G 4G) with automatic failover
+- SD card logging, a built-in web log viewer, and optional remote uploads (ABRP, MQTT, Traccar, contribute)
+- Home Assistant MQTT auto-discovery (device-based) and an optional onboard RGB status LED
+- runs headless (no display) on the Waveshare board, configured entirely over the serial console
 
 ## Supported hardware
 
@@ -30,6 +33,7 @@ Use this firmware at your own risk.
 - **Preferred:** M5Stack CoreS3
 - M5Stack Core2 v1.1
 - M5Stack Core2 v1.0
+- Waveshare ESP32-S3-SIM7670G-4G (headless: no display; onboard 4G modem + GNSS, configured over serial console)
 
 ### Vehicle interface
 
@@ -59,6 +63,7 @@ Community/ongoing support:
 - VW ID.3 / ID.4
 - Audi Q4
 - Skoda Enyaq
+- Xpeng G6, G9, P7, P7+
 
 Support level varies by model year and ECU behavior. See [RELEASENOTES.md](RELEASENOTES.md) for the latest parser and feature updates.
 
@@ -124,18 +129,22 @@ If you want stricter privacy controls (for example auto-delete horizon, route lo
 
 All supported boards run evDash, but practical behavior differs:
 
-| Topic | CoreS3 / CoreS3 SE | Core2 v1.0 | Core2 v1.1 |
-|---|---|---|---|
-| Firmware target | `m5stack-cores3` | `m5stack-core2-v1_0` | `m5stack-core2-v1_1` |
-| UI responsiveness | Best | Good | Good |
-| OBD BLE4 | Yes | Yes | Yes |
-| CAN COMMU | No | Yes | Yes |
-| CPU + speed | ESP32-S3, up to 240 MHz | ESP32, up to 240 MHz | ESP32, up to 240 MHz |
-| PMIC | AXP2101 | AXP192 | AXP2101 |
-| RTC backup battery | No | No | Yes |
+| Topic | CoreS3 / CoreS3 SE | Core2 v1.0 | Core2 v1.1 | Waveshare SIM7670G |
+|---|---|---|---|---|
+| Firmware target | `m5stack-cores3` | `m5stack-core2-v1_0` | `m5stack-core2-v1_1` | `waveshare-sim7670g` |
+| Display / UI | 320x240 touch | 320x240 touch | 320x240 touch | None (headless, serial console) |
+| OBD BLE4 | Yes | Yes | Yes | No |
+| CAN COMMU (MCP2515) | No | Yes | Yes | No |
+| Cellular (4G) | No | No | No | Yes (SIM7670G) |
+| GNSS | External module | External module | External module | Onboard (via modem) |
+| CPU | ESP32-S3, up to 240 MHz | ESP32, up to 240 MHz | ESP32, up to 240 MHz | ESP32-S3, up to 240 MHz |
+| PMIC | AXP2101 | AXP192 | AXP2101 | n/a |
+| RTC backup battery | No | No | Yes | No (uses NTP / cellular time) |
 
 CoreS3 is usually the best overall choice for daily use and UI performance.
 Core2 v1.1 is usually better than Core2 v1.0 for long-running logging and stable timekeeping.
+The Waveshare board has no screen and is configured entirely over the serial console; it suits
+always-connected logging with its onboard 4G modem and GNSS.
 
 ## No longer supported
 
