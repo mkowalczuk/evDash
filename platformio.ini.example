@@ -37,6 +37,10 @@ lib_deps =
 ; the Waveshare env overrides this with its own filter when it is added.
 [env]
 build_src_filter = ${common.src_filter_m5}
+; Embed docs/Console commands.txt into the firmware (generates
+; src/generated/console_help.h) so the on-device `help` output is exactly the
+; committed doc and the two cannot drift. Runs before every build.
+extra_scripts = pre:scripts/embed_console_help.py
 
 [core2]
 board = m5stack-core2

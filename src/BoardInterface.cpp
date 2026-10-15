@@ -38,6 +38,7 @@ It handles attaching communications and live data objects. And provides methods 
 #include "Solarlib.h"
 #include "CarModelUtils.h"
 #include "EvDashMobileRelay.h"
+#include "generated/console_help.h" // embedded docs/Console commands.txt (build-time generated)
 
 extern EvDashMobileRelay *mobileRelay;
 extern LiveData *liveData;
@@ -3457,133 +3458,16 @@ void BoardInterface::showTime()
 }
 
 /**
- * Show console commands help
+ * Show console commands help.
+ *
+ * The command reference is the embedded copy of docs/Console commands.txt
+ * (see scripts/embed_console_help.py / src/generated/console_help.h), so the
+ * text printed here is exactly the committed doc and the two cannot drift.
  */
 void BoardInterface::showHelp()
 {
   syslog->println("");
-  syslog->println(".-[ HELP: Console commands ]-_.");
-  syslog->println("System:");
-  syslog->println("  help / ?              ... show this help (alias: commands)");
-  syslog->println("  reboot / shutdown     ... reboot / deep sleep");
-  syslog->println("  saveSettings          ... save settings to EEPROM");
-  syslog->println("  factoryReset          ... reset settings to defaults");
-  syslog->println("  time                  ... print current time");
-  syslog->println("  setTime=YYYY-MM-DD HH:MM:SS ... set clock");
-  syslog->println("  ntpSync               ... sync time via NTP");
-  syslog->println("  ipconfig              ... print network status");
-  syslog->println("  debugLevel[=n|comm,net,sd,gps,abrp,modem,all,none] ... get/set debug mask");
-  syslog->println("                        use +flag/-flag/!flag to toggle one (e.g. !gps disables GPS, keeps rest)");
-  syslog->println("WiFi:");
-  syslog->println("  wifiEnabled[=0|1]     ... get/set WiFi enabled");
-  syslog->println("  wifiScan              ... scan and list WiFi APs");
-  syslog->println("  wifiConnect           ... trigger WiFi connection now");
-  syslog->println("  wifiSsid[=x]          ... get/set primary WiFi SSID");
-  syslog->println("  wifiPassword[=x]      ... get/set primary WiFi password");
-  syslog->println("  backupWifi[=0|1]      ... get/set backup WiFi enabled");
-  syslog->println("  wifiSsid2..4[=x]      ... get/set backup WiFi SSID (2..4)");
-  syslog->println("  wifiPassword2..4[=x]  ... get/set backup WiFi password (2..4)");
-  syslog->println("  apPassword[=x]        ... get/set web log server AP password");
-  syslog->println("  ntpEnabled[=0|1]      ... get/set NTP auto-sync");
-  syslog->println("Vehicle & Adapter:");
-  syslog->println("  cars                  ... list available car models & IDs");
-  syslog->println("  carType[=id|name]     ... get/set car type (reboot required)");
-  syslog->println("  commType[=0|1|ble|can]... get/set comm type (0=BLE, 1=CAN)");
-  syslog->println("  obdMac[=mac]          ... get/set OBD2 BLE MAC address");
-  syslog->println("  obd2Name[=name]       ... get/set OBD2 device display name");
-  syslog->println("  serviceUUID[=uuid]    ... get/set BLE service UUID");
-  syslog->println("  charTxUUID[=uuid]     ... get/set BLE Tx characteristic UUID");
-  syslog->println("  charRxUUID[=uuid]     ... get/set BLE Rx characteristic UUID");
-  syslog->println("  bleAddressType[=pub|rand] ... get/set BLE MAC address type");
-  syslog->println("  commandQueueAutoStop[=0|1] ... get/set CAN queue autostop");
-  syslog->println("  disableCommandOptimizer[=0|1] ... get/set command optimizer");
-  syslog->println("  mobileRelay[=0|1]     ... get/set mobile app BLE relay");
-  syslog->println("  mobileRelayPair       ... start mobile app pairing");
-  syslog->println("  mobileRelayForget     ... clear mobile app pairing");
-  syslog->println("  clearStats            ... clear driving & charging stats");
-  syslog->println("  loadTestData          ... load demo telemetry data");
-  syslog->println("Board & Settings:");
-  syslog->println("  boardPowerMode[=0|1]  ... get/set power mode (0=USB, 1=ext)");
-  syslog->println("  timezone[=n]          ... get/set timezone offset (-11..+14)");
-  syslog->println("  daylightSaving[=0|1]  ... get/set daylight saving time");
-  syslog->println("  distanceUnit[=k|m]    ... get/set unit: km or miles");
-  syslog->println("  temperatureUnit[=c|f] ... get/set unit: C or F");
-  syslog->println("  pressureUnit[=b|p]    ... get/set unit: bar or psi");
-  syslog->println("  defaultScreen[=n]     ... get/set default screen (1..6, 8)");
-  syslog->println("  displayRotation[=n]   ... get/set screen rotation (1 or 3)");
-  syslog->println("  lcdBrightness[=0..100]... get/set brightness (0=auto)");
-  syslog->println("  sleepMode[=0..2]      ... get/set sleep level (0=off,1=screen,2=deep)");
-  syslog->println("  serialConsolePort[=n] ... get/set serial console port (0, 255=off)");
-  syslog->println("  speedCorrection[=n]   ... get/set speed correction (-5..+5)");
-  syslog->println("  rightHandDrive[=0|1]  ... get/set right hand drive (RHD)");
-  syslog->println("Hardware modules:");
-  syslog->println("  sdcardEnabled[=0|1]   ... get/set SD card logging");
-  syslog->println("  sdcardConsoleLog[=0|1]... get/set console log to SD");
-  syslog->println("  sdcardAutstartLog[=0|1] ... get/set SD autostart log");
-  syslog->println("  sdcardLogRetention[=n]... get/set SD log retention: 1,5,10,20,50,100,0=unlimited");
-  syslog->println("  sdcardStatus          ... check SD card mount status");
-  syslog->println("  gpsStatus             ... check GPS fix, satellites & coordinates (alias: gps)");
-  syslog->println("  gpsInit               ... initialize / restart GPS module (alias: gnssStart)");
-  syslog->println("  modem[=info|reset|test|fw|apn|pin|user|pass|auth] ... cellular modem status / control");
-  syslog->println("  modemEnabled[=0|1]    ... get/set cellular data connection");
-  syslog->println("  modemRoaming[=0|1]    ... get/set cellular roaming allowance");
-  syslog->println("  modemPolicy[=0..3]    ... get/set transport policy (0=WiFi, 1=Cell, 2=Cell-only, 3=WiFi-only)");
-  syslog->println("  modemDataSaver[=0|1]  ... get/set reduced cellular data usage");
-  syslog->println("  modemHoldData[=0|1]   ... policy 0/1: 1=hold cellular data until needed as fallback (GPS stays on), 0=keep open");
-  syslog->println("  modemTlsInsecure[=0|1]... get/set skip TLS cert check on modem sockets");
-  syslog->println("  statusLedEnabled[=0|1]... get/set onboard RGB status LED");
-  syslog->println("  statusLedBrightness[=0..100] ... get/set status LED brightness %");
-  syslog->println("  modemNetworkMode[=0|1|2] ... get/set network mode (0 auto, 1 LTE, 2 GSM)");
-  syslog->println("  modemHttpEnabled[=0|1], modemMqttEnabled[=0|1] ... allow HTTP / MQTT over modem");
-  syslog->println("  modemSocketTimeoutMs[=ms], modemRetryBackoffSec[=sec] ... modem timing");
-  syslog->println("  gpsModuleType[=0..3]  ... get/set GPS (0=none,1=M8N,2=GNSS,3=v2.1)");
-  syslog->println("  gpsPort[=0|2|255]     ... get/set GPS hardware serial port");
-  syslog->println("  gpsSpeed[=baud]       ... get/set GPS baud rate");
-  syslog->println("  carSpeedType[=0..2]   ... get/set car speed (0=auto,1=car,2=gps)");
-  syslog->println("  voltmeterEnabled[=0|1]... get/set INA3221 voltmeter");
-  syslog->println("  voltmeterSleep[=0|1]  ... get/set voltmeter-based sleep");
-  syslog->println("  voltmeterSleepVol[=v] ... get/set voltmeter sleep voltage threshold");
-  syslog->println("  voltmeterWakeUpVol[=v]... get/set voltmeter wake-up voltage threshold");
-  syslog->println("  voltmeterCutOffVol[=v]... get/set voltmeter cut-off voltage threshold");
-  syslog->println("  voltmeterInfo         ... print current voltmeter readings");
-  syslog->println("  battery[=info|type|usbcharge] ... 18650 battery status / configuration");
-  syslog->println("  batteryPackType[=0|1] ... get/set battery chemistry (0=Li-ion, 1=LiFePO4)");
-  syslog->println("  batteryUsbChargeEnabled[=0|1] ... get/set charge only when USB powered");
-  syslog->println("Remote upload & MQTT:");
-  syslog->println("  remoteUploadIntervalSec[=s] ... get/set upload interval (0=disabled)");
-  syslog->println("  remoteUploadAbrpIntervalSec[=s] ... get/set ABRP interval");
-  syslog->println("  remoteApiUrl[=url]    ... get/set remote server URL");
-  syslog->println("  remoteApiKey[=key]    ... get/set remote server API key");
-  syslog->println("  abrpApiToken[=token]  ... get/set ABRP telemetry token");
-  syslog->println("  abrpSdcardLog[=0|1]   ... get/set log ABRP to SD");
-  syslog->println("  contributeData[=0|1]  ... get/set contribute to evdash.eu");
-  syslog->println("  contributeOnce        ... send contribute snapshot now");
-  syslog->println("  traccarEnabled[=0|1]  ... get/set Traccar client");
-  syslog->println("  traccarServer[=host]  ... get/set Traccar server host");
-  syslog->println("  traccarPort[=port]    ... get/set Traccar server port");
-  syslog->println("  mqtt                  ... show all MQTT settings");
-  syslog->println("  testMqtt              ... test MQTT connection & publish");
-  syslog->println("  mqttEnabled[=0|1]     ... get/set MQTT upload");
-  syslog->println("  mqttSecure[=0|1]      ... get/set MQTT TLS/SSL encryption");
-  syslog->println("  mqttServer[=host]     ... get/set MQTT server host");
-  syslog->println("  mqttPort[=port]       ... get/set MQTT port (0=auto 1883/8883)");
-  syslog->println("  mqttId[=id]           ... get/set MQTT client ID");
-  syslog->println("  mqttUsername[=user]   ... get/set MQTT username");
-  syslog->println("  mqttPassword[=pwd]    ... get/set MQTT password");
-  syslog->println("  mqttPubTopic[=topic]  ... get/set MQTT publish topic");
-  syslog->println("  mqttHa[=0|1]          ... get/set Home Assistant MQTT discovery");
-  syslog->println("  haName[=name]         ... get/set Home Assistant device name");
-  syslog->println("  haModel[=model]       ... get/set Home Assistant device model");
-  syslog->println("  mqttInterval[=sec]    ... get/set MQTT upload interval");
-  syslog->println("  mqttInstantUpdates[=0|1] ... get/set instant publish on car update");
-  syslog->println("  mqttGpsInterval[=sec] ... get/set MQTT GPS interval (0=every send)");
-  syslog->println("  webServer[=0|1]       ... start/stop web log server (view/download SD logs)");
-  syslog->println("  webServerTimeout[=sec]... get/set web server idle auto-stop (0=never, default 300)");
-  syslog->println("Diagnostics & CAN:");
-  syslog->println("  record=1..4           ... record CAN response buffer");
-  syslog->println("  compare               ... compare CAN buffers");
-  syslog->println("  test=x                ... run car test handler");
-  syslog->println("__________________________________________________");
+  syslog->println(CONSOLE_HELP);
 }
 
 /**

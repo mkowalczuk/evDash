@@ -6,3 +6,5 @@ platformio.ini
 # Local-only notes / audits — must never reach the public repo
 AUDIT_*.md
 _local/
+# Build-time generated: embedded console help (from docs/Console commands.txt)
+src/generated/
